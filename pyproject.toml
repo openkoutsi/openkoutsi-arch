@@ -1,0 +1,10 @@
+[project]
+name = "openkoutsi-arch"
+version = "0.1.0"
+description = "Architectural documentation for the openkoutsi platform"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mkdocs-material>=9.5",
+    "pymdown-extensions>=10.7",
+]
