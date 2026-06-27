@@ -1,0 +1,78 @@
+site_name: openkoutsi architecture
+site_description: Architectural documentation for openkoutsi, the self-hosted cycling coaching platform.
+site_url: https://openkoutsi.github.io/openkoutsi-arch/
+site_author: openkoutsi
+
+repo_url: https://github.com/openkoutsi/openkoutsi-arch
+repo_name: openkoutsi/openkoutsi-arch
+edit_uri: edit/main/docs/
+
+copyright: Licensed under Apache-2.0.
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Backend: architecture/backend.md
+      - Data & storage model: architecture/data-model.md
+      - Frontend: architecture/frontend.md
+      - Auth, roles & onboarding: architecture/auth.md
+  - API:
+      - API v2 contract: api/index.md
+  - Integrations:
+      - Overview: integrations/index.md
+      - Strava: integrations/strava.md
+      - Wahoo: integrations/wahoo.md
