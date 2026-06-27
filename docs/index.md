@@ -7,13 +7,11 @@ training plans, and get optional AI coaching feedback — all on a server you co
 This site documents the platform's **architecture**: how the pieces fit together, where data
 lives, and how the Strava and Wahoo integrations work.
 
-!!! info "Target (v2) architecture"
-    This documentation describes the **target architecture** defined in
-    [lassiheikkila/openkoutsi#122](https://github.com/LassiHeikkila/openkoutsi/issues/122).
-    The two defining changes from v1 are a **simplified, token-scoped API (v2)** and the
-    **removal of the multi-tenant "team" layer** in favour of a **single deployment instance
-    with one SQLite database per user**. Pages flag where this differs from the older
-    team-based design.
+!!! info "Target v2 architecture"
+    This documentation describes the **target v2 architecture**. The two defining changes from
+    v1 are a **simplified, token-scoped API (v2)** and the **removal of the multi-tenant "team"
+    layer** in favour of a **single deployment instance with one SQLite database per user**.
+    Pages flag where this differs from the older team-based design.
 
 ## The system at a glance
 

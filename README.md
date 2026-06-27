@@ -4,9 +4,10 @@ Architectural documentation for the **openkoutsi** platform — a self-hosted cy
 system. The site is built with [MkDocs](https://www.mkdocs.org/) +
 [Material](https://squidfunk.github.io/mkdocs-material/) and published to GitHub Pages.
 
-It describes the **target (v2) architecture** defined in
-[lassiheikkila/openkoutsi#122](https://github.com/LassiHeikkila/openkoutsi/issues/122):
-a single-instance, per-user database model with a simplified, token-scoped API.
+**📖 Read the docs: <https://openkoutsi.github.io/openkoutsi-arch/>**
+
+It describes the **target v2 architecture**: a single-instance, per-user database model with a
+simplified, token-scoped API.
 
 > This is an **architecture reference** for contributors and operators. End-user documentation
 > lives in [openkoutsi/openkoutsi-docs](https://github.com/openkoutsi/openkoutsi-docs); the
