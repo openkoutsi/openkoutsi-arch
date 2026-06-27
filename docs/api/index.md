@@ -1,8 +1,7 @@
 # API v2 contract
 
 The public API is a REST interface served under the **`/api/v2`** base path and secured by a
-JWT bearer token. This page describes the **v2 conventions** introduced by
-[lassiheikkila/openkoutsi#122](https://github.com/LassiHeikkila/openkoutsi/issues/122) — the
+JWT bearer token. This page describes the **v2 conventions** of the target architecture — the
 design goal is a contract that is consistent and predictable across every resource.
 
 !!! note "Canonical spec"
