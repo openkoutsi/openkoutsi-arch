@@ -20,10 +20,10 @@ flowchart LR
     API --> Store
     API -->|poll| SB
     API -->|poll| WB
-    SB <--> Strava(("Strava API"))
-    WB <--> Wahoo(("Wahoo API"))
-    API -->|OAuth + REST| Strava
-    API -->|OAuth + REST| Wahoo
+    Strava(("Strava API")) -->|webhooks| SB
+    Wahoo(("Wahoo API")) -->|webhooks| WB
+    API <-->|"OAuth + data REST"| Strava
+    API <-->|"OAuth + data REST"| Wahoo
     API -.->|optional| LLM(("LLM"))
 ```
 

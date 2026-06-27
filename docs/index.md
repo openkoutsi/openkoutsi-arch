@@ -23,8 +23,10 @@ flowchart TD
     API --> UserDB[("Per-user DBs<br/>users/&#123;id&#125;/user.db")]
     API -->|"poll events"| SB["Strava bridge"]
     API -->|"poll events"| WB["Wahoo bridge"]
-    SB <-->|webhooks / OAuth| Strava(("Strava"))
-    WB <-->|webhooks / OAuth| Wahoo(("Wahoo"))
+    Strava(("Strava")) -->|webhooks| SB
+    Wahoo(("Wahoo")) -->|webhooks| WB
+    API <-->|"OAuth + data"| Strava
+    API <-->|"OAuth + data"| Wahoo
     API -->|optional| LLM(("LLM<br/>OpenAI-compatible"))
 ```
 
