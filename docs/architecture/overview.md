@@ -55,6 +55,23 @@ the full event flow.
     many users share; each user's athlete profile and training data live in their own SQLite
     database. See [Data & storage model](data-model.md).
 
+## Observability
+
+All services log to stdout, and the deployment captures two complementary views — both
+served over HTTPS behind basic-auth on their own subdomains:
+
+| Signal | Pipeline | Where to look |
+|---|---|---|
+| **HTTP traffic** | nginx access log → **GoAccess** real-time report | `stats.<domain>` |
+| **Service logs** (web, backend, both bridges) | container stdout → **Vector** → per-service, daily-rotated files on a dedicated log volume; **Dozzle** live viewer | files on the data device · `logs.<domain>` |
+
+Vector tails every container's output through the Docker API and writes it to a dedicated
+`service_logs` volume on the encrypted data device, so logs survive container recreation
+(every deploy recreates containers) and are pruned on a retention timer. This keeps
+application logs durable without changing any service code. The collector, viewers, and
+retention policy are defined in the
+[`openkoutsi-ops`](https://github.com/openkoutsi/openkoutsi-ops) deployment repository.
+
 ## Technology stack
 
 | Layer | Technology |
