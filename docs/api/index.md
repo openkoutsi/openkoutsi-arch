@@ -27,8 +27,6 @@ parameters (`page`, `page_size`) are identical everywhere.
 { "items": [ /* Activity */ ], "total": 128, "page": 1, "page_size": 50 }
 ```
 
-*v1:* only `/activities` was paginated; every other collection returned a bare JSON array.
-
 ### 2. Token-scoped paths (no team slug)
 
 There is no `/teams/{slug}` prefix. Scope comes entirely from the bearer token. Team-admin
@@ -37,36 +35,32 @@ not from a path slug. See [Auth, roles & onboarding](../architecture/auth.md).
 
 ### 3. No trailing slashes
 
-Collection roots have no trailing slash (`/activities`, `/goals`, `/plans`, …), normalizing the
-v1 mix of `/athlete/` vs `/messages`.
+Collection roots have no trailing slash (`/activities`, `/goals`, `/plans`, …).
 
 ### 4. `GET` + `PATCH` only on `/athlete`
 
-The athlete resource exposes `GET` and `PATCH`. The redundant v1 `PUT` (identical body and
-response to `PATCH`) is removed.
+The athlete resource exposes `GET` and `PATCH` only.
 
 ### 5. A single `/messages` resource with a scope filter
 
-One messages resource replaces the duplicated user and superadmin message APIs. Admin visibility
-is a query parameter, not a separate route tree:
+One messages resource serves both users and admins. Admin visibility is a query parameter, not a
+separate route tree:
 
 ```
 GET /messages?scope=self            # default
 GET /messages?scope=team|all        # admin only
 ```
 
-*v1:* a full `/superadmin/messages*` set mirrored `/messages*` 1:1.
-
 ### 6. Consolidated analytics under `/metrics`
 
 All read-only analytics live under `/metrics`:
 
-| v2 | Replaces (v1) |
+| Endpoint | Returns |
 |---|---|
-| `GET /metrics/bests/{kind}` (`distance` \| `power`) | `/distance/bests`, `/power/bests` |
-| `GET /metrics/ftp` | `/power/ftp-estimate` |
-| `GET /metrics/ftp/history` | `/metrics/ftp-history` |
-| `GET /metrics/fitness`, `/metrics/fitness/current` | (unchanged) |
+| `GET /metrics/bests/{kind}` (`distance` \| `power`) | Best efforts for the given kind |
+| `GET /metrics/ftp` | Current FTP estimate |
+| `GET /metrics/ftp/history` | FTP history |
+| `GET /metrics/fitness`, `/metrics/fitness/current` | CTL/ATL/TSB series and current values |
 
 ### 7. Provider-agnostic push actions
 
@@ -80,8 +74,6 @@ POST /plans/{plan_id}/push-upcoming/{provider}
 
 Both take a `ProviderPushRequest` and return a `ProviderPushResponse`. This mirrors the existing
 `/integrations/{provider}/…` design and lets new providers slot in without new endpoints.
-
-*v1:* the provider was hardcoded (`…/push/wahoo`) with Wahoo-specific request/response schemas.
 
 ### 8. Consolidated avatar endpoints
 

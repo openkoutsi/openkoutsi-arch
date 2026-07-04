@@ -12,11 +12,8 @@ token in memory and refreshes it transparently on a `401` (see [Frontend](fronte
 All non-public API operations require the bearer token; the OpenAPI document declares a single
 `bearerAuth` (HTTP bearer, JWT) security scheme applied globally.
 
-!!! info "Change from v1 — token-scoped, no team_id"
-    In v1 the JWT carried a `team_id` and many routes were nested under `/api/teams/{slug}/…`.
-    In v2 the token carries only **`sub`** (the user) and **`roles`**. There is no team in the
-    token and no `{slug}` in any path — the authenticated user fully determines scope. At login,
-    a `team_slug` field is no longer needed.
+The token is **token-scoped**: it carries only **`sub`** (the user) and **`roles`**. There is no
+team in the token and no `{slug}` in any path — the authenticated user fully determines scope.
 
 ## Roles
 
@@ -27,8 +24,8 @@ The role model is reduced to two levels:
 | **User** | Owns and manages their own athlete profile and training data. |
 | **Instance admin** | Everything a user can do, plus instance administration: managing users, issuing invitations, and editing instance-wide settings (including LLM configuration). |
 
-The v1 **coach** and **superadmin** roles are **dropped**. Coaching across athletes no longer
-exists in the single-instance model, and superadmin duties fold into the single instance admin.
+There are only these two roles. Coaching across athletes does not exist in the single-instance
+model, and all instance-wide administration is handled by the instance admin.
 
 ## Onboarding
 
@@ -48,6 +45,5 @@ flowchart LR
 
 ## Consent
 
-Data-consent is recorded **on the user row** in the registry DB (the v1 standalone
-`DataConsent` table is absorbed into `users`). Users can export their data and delete their
-account at any time.
+Data-consent is recorded **on the user row** in the registry DB. Users can export their data and
+delete their account at any time.

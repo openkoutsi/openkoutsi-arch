@@ -51,9 +51,9 @@ only the (data-light) bridges on a public host. See [Integrations](../integratio
 the full event flow.
 
 !!! info "Single instance, per-user data"
-    In the v2 architecture there are **no teams**. One deployment is a single instance that
-    many users share; each user's athlete profile and training data live in their own SQLite
-    database. See [Data & storage model](data-model.md).
+    There are **no teams**. One deployment is a single instance that many users share; each
+    user's athlete profile and training data live in their own SQLite database. See
+    [Data & storage model](data-model.md).
 
 ## Observability
 
