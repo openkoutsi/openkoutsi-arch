@@ -16,13 +16,10 @@ src/
 ```
 
 Routing is localized through a `[locale]` segment. Pages are organized by feature
-(dashboard, activities, plans, workouts, profile, admin, setup).
-
-!!! info "Change from v1 — routing"
-    v1 nested the whole app under a team slug: `app/[locale]/t/[slug]/…`. v2 is **token-scoped**:
-    the team slug is dropped from every route, so pages live directly under `app/[locale]/…`.
-    `middleware.ts` guards protected pages using only the non-secret `session` cookie; the
-    backend remains the real authority on access.
+(dashboard, activities, plans, workouts, profile, admin, setup) and live directly under
+`app/[locale]/…`. Routing is **token-scoped** — there is no team slug in any path.
+`middleware.ts` guards protected pages using only the non-secret `session` cookie; the backend
+remains the real authority on access.
 
 ## Talking to the backend
 
@@ -35,16 +32,14 @@ Routing is localized through a `[locale]` segment. Pages are organized by featur
   carries no secret — it only lets the Next.js middleware gate protected pages before the
   client-side auth provider has run.
 
-`src/lib/auth.tsx` provides the auth context (current session, login/logout). In v2 it exposes
-the session without a `teamSlug` prop, and the team-scoped refresh path
-(`/api/teams/{slug}/auth/refresh`) becomes a plain token-scoped `/api/v2/auth/refresh`.
+`src/lib/auth.tsx` provides the auth context (current session, login/logout). It refreshes
+against the token-scoped `/api/v2/auth/refresh` endpoint.
 
 ## Admin & setup
 
 - The **admin** page is the **instance admin** console (users, invitations, and instance-wide
-  LLM settings). The v1 superadmin page and team/join-request flows are removed.
-- The **setup** page is a first-run wizard that creates the first **instance admin** (no team
-  fields).
+  LLM settings).
+- The **setup** page is a first-run wizard that creates the first **instance admin**.
 
 ## Conventions
 

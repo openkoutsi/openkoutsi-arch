@@ -7,11 +7,10 @@ training plans, and get optional AI coaching feedback — all on a server you co
 This site documents the platform's **architecture**: how the pieces fit together, where data
 lives, and how the Strava and Wahoo integrations work.
 
-!!! info "Target v2 architecture"
-    This documentation describes the **target v2 architecture**. The two defining changes from
-    v1 are a **simplified, token-scoped API (v2)** and the **removal of the multi-tenant "team"
-    layer** in favour of a **single deployment instance with one SQLite database per user**.
-    Pages flag where this differs from the older team-based design.
+!!! info "v2 architecture"
+    This documentation describes the **current architecture**: a **single deployment instance**
+    with **one SQLite database per user** and a **simplified, token-scoped API (v2)**. For how
+    the architecture has evolved across major versions, see [Version history](version-history.md).
 
 ## The system at a glance
 
@@ -46,3 +45,4 @@ lives in **their own SQLite database**.
 | Login, roles, and onboarding | [Architecture → Auth, roles & onboarding](architecture/auth.md) |
 | The public API contract and its conventions | [API → API v2 contract](api/index.md) |
 | How Strava / Wahoo connect and sync | [Integrations](integrations/index.md) |
+| How the architecture changed between major versions | [Version history](version-history.md) |
