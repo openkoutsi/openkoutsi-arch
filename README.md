@@ -6,8 +6,8 @@ system. The site is built with [MkDocs](https://www.mkdocs.org/) +
 
 **📖 Read the docs: <https://openkoutsi.github.io/openkoutsi-arch/>**
 
-It describes the **target v2 architecture**: a single-instance, per-user database model with a
-simplified, token-scoped API.
+It describes the **current (v2) architecture**, now implemented: a single-instance, per-user
+database model with a simplified, token-scoped API.
 
 > This is an **architecture reference** for contributors and operators. End-user documentation
 > lives in [openkoutsi/openkoutsi-docs](https://github.com/openkoutsi/openkoutsi-docs); the

@@ -1,6 +1,6 @@
 # Data & storage model
 
-openkoutsi stores everything in **SQLite** (WAL mode). The target architecture uses a two-tier
+openkoutsi stores everything in **SQLite** (WAL mode). The v2 architecture uses a two-tier
 layout: one shared **registry database** plus **one database per user**.
 
 !!! info "Change from v1"
