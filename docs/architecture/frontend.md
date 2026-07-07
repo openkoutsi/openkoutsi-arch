@@ -36,7 +36,7 @@ remains the real authority on access.
   client-side auth provider has run.
 
 `src/lib/auth.tsx` provides the auth context (current session, login/logout). It refreshes
-against the token-scoped `/api/v2/auth/refresh` endpoint.
+against the `/api/auth/refresh` endpoint.
 
 ## Admin & setup
 
