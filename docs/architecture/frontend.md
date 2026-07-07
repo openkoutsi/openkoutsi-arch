@@ -26,7 +26,10 @@ remains the real authority on access.
 `src/lib/api.ts` centralizes API access:
 
 - **`apiFetch`** attaches the in-memory access token as a `Bearer` header and sends requests to
-  `NEXT_PUBLIC_API_URL`. The access token is held in memory only (never persisted to storage).
+  the backend origin resolved at runtime by `getApiUrl()` — from the `API_URL` env var on the
+  server, and from `window.__ENV__` (injected by the root layout from the same var) in the
+  browser — so a single built image can target any environment. The access token is held in
+  memory only (never persisted to storage).
 - On a `401`, it transparently calls the refresh endpoint once and retries the request.
 - **`setSessionCookie` / `clearSessionCookie`** manage a non-sensitive `session=1` cookie. It
   carries no secret — it only lets the Next.js middleware gate protected pages before the
