@@ -67,6 +67,7 @@ nav:
   - Architecture:
       - Overview: architecture/overview.md
       - Backend: architecture/backend.md
+      - LLM & AI features: architecture/llm.md
       - Data & storage model: architecture/data-model.md
       - Frontend: architecture/frontend.md
       - Auth, roles & onboarding: architecture/auth.md
