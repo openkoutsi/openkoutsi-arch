@@ -20,9 +20,9 @@ flowchart TD
   via Pydantic **schemas** (`backend/app/schemas/*`), resolve the authenticated user, and
   delegate to services. Mounted under `/api` by `backend/main.py`.
 - **Services** (`backend/app/services/*`) — application logic: the provider-sync pipeline,
-  `metrics_engine` (CTL/ATL/TSB), the LLM features (`llm_activity_analyzer`,
-  `llm_plan_generator`, `llm_workout_generator`, `llm_training_status_analyzer`), the
-  `activity_workout_matcher`, `pr_detection`, and `notifications`.
+  `metrics_engine` (CTL/ATL/TSB), the [LLM features](llm.md) (`llm_activity_analyzer`,
+  `llm_plan_generator`, `llm_workout_generator`, `llm_training_status_analyzer`, and the shared
+  `llm_client`), the `activity_workout_matcher`, `pr_detection`, and `notifications`.
 - **Core library** (`openkoutsi/`) — framework-agnostic domain code with no FastAPI or DB
   imports: `fit`/`fit_processing` (FIT decoding), `training_math` (TSS, normalized power,
   power/distance bests), `categorization` (Coggan zone classification), `plan_builder`,
