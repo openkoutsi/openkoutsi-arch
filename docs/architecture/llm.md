@@ -20,14 +20,15 @@ Four services under `backend/app/services/` use the LLM, plus one pass-through p
 | **Daily training status** | `llm_training_status_analyzer` | Streaming prose |
 | **AI plan generation** | `llm_plan_generator` | One-shot JSON |
 | **AI workout generation** | `llm_workout_generator` | One-shot JSON |
-| **Chat proxy** | `POST /api/llm/chat` (`backend/app/api/llm.py`) | Streaming or one-shot, browser-driven |
+| **Chat proxy** | `POST /api/llm/chat` (`backend/app/api/llm.py`) | Streaming or one-shot, general-purpose |
 
 The two **analysers** stream Server-Sent Events (SSE) straight through to the browser so the
 user sees text as it is generated. The two **generators** make a blocking call and parse the
 model's reply as JSON (`extract_json` strips markdown fences before `json.loads`), retrying once
-with a correction nudge if the first response doesn't parse. The **chat proxy** lets the
-frontend call the configured model directly for interactive use, without the API key ever
-reaching the browser.
+with a correction nudge if the first response doesn't parse. The **chat proxy** is a
+general-purpose passthrough to the configured model — with the API key never reaching the
+browser — that a client can drive directly. It isn't wired to a UI today; it exists as the
+foundation for future conversational features.
 
 ## OpenAI compatibility
 
