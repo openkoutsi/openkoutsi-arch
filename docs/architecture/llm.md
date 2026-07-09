@@ -133,6 +133,44 @@ Two thin wrappers adapt this for their callers:
 effective selection (the first preset when nothing is saved), so the UI picker mirrors exactly
 what `resolve_llm()` would choose.
 
+## Subscription gating & usage tracking (issue #9)
+
+An **opt-in, per-instance gate** decides whether a user may use the *instance's* LLM credentials.
+It is controlled by the single boolean `instance_settings.llm_requires_subscription` (default
+**false** — self-hosted behaviour is unchanged until an admin flips it). One function,
+**`check_llm_access(ctx, athlete, instance, registry_session)`** in
+`backend/app/services/llm_access.py`, returns an `LlmAccess(allowed, mode, reason)`:
+
+| `llm_requires_subscription` | BYOK active | entitled | result |
+|---|---|---|---|
+| off (default) | any | any | allowed, `ungated` — resolution unchanged |
+| on | yes | any | allowed, `byok` — resolved with `allow_instance_fallback=False`; instance credentials never touched |
+| on | no | yes | allowed, `entitled` — instance presets usable |
+| on | no | no | denied → HTTP 403 `{"detail": {"code": "llm_subscription_required", …}}` |
+
+The 403 carries a **structured `detail.code`** so every frontend branches on a stable key, not
+message text. It gates the chat proxy, the plan/workout generators, activity analysis and the
+training-status trigger — **including the background auto hooks**, which are checked in the request
+context before spawning; denied users are skipped silently (their auto-analyze settings stay saved
+but inert). Admins are **not** implicitly exempt (they can grant themselves an entitlement); the
+admin/user *test-connection* probes stay ungated. `GET /api/llm/access` reports
+`{gated, mode, entitlement}` as the frontend's single source of truth.
+
+**Usage recording.** `record_llm_usage(...)` is fire-and-forget: it opens its own short-lived
+session on the **separate** [`llm_usage` database](data-model.md) and records one row per call —
+`feature`, resolved `provider` and `model`, and **input/output tokens counted separately**.
+Failures log a warning and never break the user's request. **Only instance-paid calls are
+recorded — when `source == "user"` (BYOK) the call is skipped entirely**, because the hoster pays
+nothing for it. `call_llm` returns `(text, usage)` for the non-streaming generators; the chat
+proxy and both streaming analysers inject `stream_options.include_usage` and capture the trailing
+usage chunk (retrying once without the option for Ollama-family servers, and recording nulls when
+usage never arrives rather than estimating). `GET /api/admin/llm-usage/summary` aggregates the
+usage DB into day/week/month buckets (or by user/provider/feature), answering "tokens per user per
+month" — the original "average LLM cost per user" question.
+
+Phase 2 (a generic, provider-agnostic payment handler that drives the same `llm_entitlements`
+table automatically) is tracked in issue #16.
+
 ## Security model
 
 The browser never talks to the LLM directly — every call is **proxied server-to-server**:

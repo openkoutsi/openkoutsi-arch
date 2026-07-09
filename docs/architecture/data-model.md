@@ -1,7 +1,8 @@
 # Data & storage model
 
 openkoutsi stores everything in **SQLite** (WAL mode). Storage is a two-tier layout: one shared
-**registry database** plus **one database per user**.
+**registry database**, **one database per user**, and a small dedicated
+**LLM-usage database**.
 
 ## Two tiers
 
@@ -13,6 +14,10 @@ flowchart TD
         PR["password_reset_tokens"]
         PC["provider_connections (encrypted tokens)"]
         IS["instance_settings (single row)"]
+        EN["llm_entitlements (per-user LLM access)"]
+    end
+    subgraph Usage["LLM-usage DB — data/llm_usage.db (separate)"]
+        LU["llm_usage (instance-paid calls only)"]
     end
     subgraph PerUser["Per-user DB — data/users/&#123;id&#125;/user.db"]
         Ath["athlete (one per DB)"]
@@ -29,6 +34,8 @@ flowchart TD
     end
     U -->|owns| PerUser
     U --> PC
+    U --> EN
+    U -.records.-> LU
     PerUser --> Files
 ```
 
@@ -47,7 +54,28 @@ Shared, instance-wide tables:
   `label`, `base_url`, `model`, `api_key_enc`, `headers`, `body`) whose **first entry is the
   instance default**. Per-preset API keys are encrypted with `encrypt_instance_secret`. There is
   no instance single-config or global-headers column, and no env-var fallback (see the
-  [LLM architecture](llm.md)).
+  [LLM architecture](llm.md)). The single boolean **`llm_requires_subscription`** (default
+  false) is the opt-in [LLM subscription gate](llm.md); until an admin flips it, LLM features
+  work as before.
+- **`llm_entitlements`** — a per-user "LLM access" entitlement (one row per user, `user_id`
+  unique). A table rather than a role because it carries expiry, provenance and audit fields
+  (`status`, `source`, `granted_by_user_id`, `starts_at`, `expires_at`, `external_ref`, `notes`)
+  and is an idempotent upsert target for the future payment handler. Roles keep meaning
+  *permissions*; entitlements mean *commercial state*. Entitled predicate:
+  `status = active AND starts_at <= now AND (expires_at IS NULL OR expires_at > now)`.
+
+### LLM-usage DB (`data/llm_usage.db`, path configurable via `LLM_USAGE_DB`)
+
+A **separate** database — its own SQLAlchemy `Base`, engine, sessionmaker and Alembic chain
+(head `001`) — holding one append-only row per **instance-paid** LLM call in a single
+**`llm_usage`** table (`user_id`, `created_at`, `feature`, `provider`, `model`,
+`prompt_tokens`, `completion_tokens`, `total_tokens`, `key_source`, `duration_ms`; indexed on
+`(user_id, created_at)`). It is kept apart from the registry DB so its high-volume, unbounded
+rows can be pruned/rotated independently, and it carries no registry foreign keys (a
+user-deletion sweep is a plain `DELETE … WHERE user_id = ?`). Input and output tokens are stored
+**separately** — providers price them differently. **BYOK calls are never recorded**: the hoster
+pays nothing for them, so every row is instance-paid (there is no `byok` column). See the
+[LLM architecture](llm.md).
 
 ### Per-user DB (`data/users/{user_id}/user.db`)
 
@@ -79,7 +107,8 @@ users share one instance.
 
 ## Migrations
 
-Schema changes are managed with **Alembic**. There are two migration environments: one for the
-registry DB and one for the per-user DB schema (applied to each user database).
+Schema changes are managed with **Alembic**. There are three migration environments: one for the
+registry DB, one for the per-user DB schema (applied to each user database), and one for the
+separate LLM-usage DB.
 
 For how the storage model reached this two-tier layout, see [Version history](../version-history.md).
