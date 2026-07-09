@@ -34,8 +34,9 @@ flowchart TD
 
 `backend/main.py` builds the FastAPI app, installs middleware (CORS scoped to the frontend
 origin, a security-headers middleware, and a rate limiter), and includes every router. On
-startup its lifespan handler initializes the registry database and launches the two **background
-pollers** as asyncio tasks:
+startup its lifespan handler initializes the registry database and the separate
+[LLM-usage database](data-model.md) (see the [subscription gate & usage tracking](llm.md#subscription-gating-usage-tracking-issue-9)),
+then launches the two **background pollers** as asyncio tasks:
 
 ```python
 strava_poller = asyncio.create_task(strava_bridge_poller())
