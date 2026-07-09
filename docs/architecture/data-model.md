@@ -42,14 +42,22 @@ Shared, instance-wide tables:
 - **`provider_connections`** — a user's Strava/Wahoo OAuth connection. Access and refresh tokens
   are stored with an `EncryptedString` column type. A connection belongs to the **user globally**
   (one connect per provider, enforced by a `(user_id, provider)` unique constraint).
-- **`instance_settings`** — a single-row table holding instance-wide configuration (e.g. LLM
-  overrides).
+- **`instance_settings`** — a single-row table holding instance-wide configuration. Its LLM
+  config is entirely the **`llm_models`** JSON column: a list of selectable presets (`name`,
+  `label`, `base_url`, `model`, `api_key_enc`, `headers`, `body`) whose **first entry is the
+  instance default**. Per-preset API keys are encrypted with `encrypt_instance_secret`. There is
+  no instance single-config or global-headers column, and no env-var fallback (see the
+  [LLM architecture](llm.md)).
 
 ### Per-user DB (`data/users/{user_id}/user.db`)
 
 Everything a single athlete owns — **one athlete per database**:
 
-- The **athlete** profile (FTP, zones, app settings).
+- The **athlete** profile (FTP, zones, and `app_settings`). `app_settings` holds the user's
+  **BYOK** LLM config: `llm_base_url`, `llm_model`, and `llm_api_key_enc` (encrypted per-user with
+  `encrypt_secret(key, user_id)` and never serialized back — reads expose a derived
+  `llm_api_key_set` boolean). A non-empty `llm_base_url` means BYOK is active and only the user's
+  own config is used (the [no-mixing rule](llm.md#resolving-one-request)).
 - All **activities** with their `ActivitySource`, `ActivityStream`, `ActivityInterval`, and
   `ActivityPowerBest` / `ActivityDistanceBest` rows.
 - **goals**, training **plans** (with planned workouts), and standalone **workout** definitions.
