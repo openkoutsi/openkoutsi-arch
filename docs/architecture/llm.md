@@ -12,12 +12,13 @@ action, nothing is ever sent to a model and every other feature keeps working.
 
 ## The features
 
-Four services under `backend/app/services/` use the LLM, plus one pass-through proxy:
+Five services under `backend/app/services/` use the LLM, plus one pass-through proxy:
 
 | Feature | Service | Shape |
 |---|---|---|
 | **Activity analysis** | `llm_activity_analyzer` | Streaming prose |
 | **Daily training status** | `llm_training_status_analyzer` | Streaming prose |
+| **Goal guidance** | `llm_goal_guidance` | Streaming prose |
 | **AI plan generation** | `llm_plan_generator` | One-shot JSON |
 | **AI workout generation** | `llm_workout_generator` | One-shot JSON |
 | **Chat proxy** | `POST /api/llm/chat` (`backend/app/api/llm.py`) | Streaming or one-shot, general-purpose |
@@ -29,6 +30,12 @@ with a correction nudge if the first response doesn't parse. The **chat proxy** 
 general-purpose passthrough to the configured model — with the API key never reaching the
 browser — that a client can drive directly. It isn't wired to a UI today; it exists as the
 foundation for future conversational features.
+
+**Goal guidance** (`llm_goal_guidance`) shares the daily training-status shape: an on-demand
+background task streams the coach's prose, persists it incrementally on the goal row, and is
+polled by the client (trigger + poll). It judges whether a goal is realistic for its timeline
+and leads with a machine-readable `REALISM:` tag line (`realistic` / `ambitious` /
+`unrealistic`), mirroring the training-status `MOOD:` convention.
 
 ## OpenAI compatibility
 

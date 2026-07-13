@@ -89,6 +89,10 @@ Everything a single athlete owns — **one athlete per database**:
 - All **activities** with their `ActivitySource`, `ActivityStream`, `ActivityInterval`, and
   `ActivityPowerBest` / `ActivityDistanceBest` rows.
 - **goals**, training **plans** (with planned workouts), and standalone **workout** definitions.
+  Each goal also carries on-demand AI-guidance columns (`guidance`, `guidance_verdict`,
+  `guidance_status`, `guidance_updated_at`) — the streamed coach prose, its parsed
+  `realistic`/`ambitious`/`unrealistic` verdict, and the pending/done/error state with a
+  timestamp for pending-timeout recovery (mirroring the athlete's `training_status*` columns).
 - The user's **message inbox**.
 
 The schema is created idempotently, so an existing message-only DB simply gains the training
