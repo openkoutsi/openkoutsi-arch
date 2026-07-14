@@ -92,6 +92,23 @@ Every operation sets an explicit `operationId` and human `summary` (e.g. `listAc
 `pushWorkoutToProvider`), and responses use **named** schemas. This keeps FastAPI's
 auto-generated function names and inline array titles out of the public contract.
 
+### 10. Async AI actions (trigger + poll)
+
+Long-running LLM work is exposed as a `POST` that returns `202` immediately and a `GET` that
+reports the persisted state (`pending` / `done` / `error`), with a 30-minute pending-timeout
+recovery. **Goal guidance** follows this pattern:
+
+```
+POST /goals/{goal_id}/guidance   # triggerGoalGuidance → 202 {"status":"pending"}; body: {locale?}
+GET  /goals/{goal_id}/guidance   # getGoalGuidance → GoalGuidanceResponse
+```
+
+`GoalGuidanceResponse` carries `status`, `verdict` (`realistic`/`ambitious`/`unrealistic`),
+`guidance` (the streamed prose, with the leading `REALISM:` tag stripped), and `updated_at`.
+The daily training-status endpoints (`POST/GET /athlete/training-status`) use the same shape.
+Both are gated by the LLM subscription check and return `403 llm_subscription_required` when
+denied on a gated instance.
+
 ## Example: a paginated collection
 
 ```jsonc
