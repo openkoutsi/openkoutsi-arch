@@ -122,5 +122,10 @@ denied on a gated instance.
 
 ## Security
 
-A single global security scheme applies: HTTP **bearer** auth carrying a **JWT**. Public
-endpoints (`/health`, `/version`, `/public/...`) are the only unauthenticated operations.
+A single global security scheme applies: HTTP **bearer** auth carrying a **JWT**. The
+unauthenticated operations are `/health`, `/version`, `/public/...`, and the credential
+endpoints under `/auth/...` — login, refresh, invite `register`, and the self-serve email
+flows: `POST /auth/signup`, `POST /auth/verify-email`, `POST /auth/request-password-reset`
+and `POST /auth/reset-password`. The signup/verify/reset endpoints are gated at runtime
+(`allow_self_signup` and a configured email provider) and rate-limited; the request-reset and
+signup endpoints always return a generic response to avoid account enumeration.

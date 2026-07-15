@@ -80,3 +80,24 @@ de-duplicated by `(provider, external_id)`. After a verified run the team tables
 - **Admin & setup** — the v1 superadmin page and the team / join-request flows were removed; the
   admin console became the instance-admin console and setup creates the first instance admin with
   no team fields.
+
+## Notable v2 additions
+
+Feature deltas layered onto v2 after the initial collapse.
+
+### Auth & API — email-based signup + self-serve password reset
+
+- **Email as a login identifier** — `users.email` (unique, nullable) and
+  `users.email_verified_at` were added; `users.username` became nullable. Email is a login
+  identifier **alongside** username (login accepts either), so invited/legacy accounts are
+  unaffected. New `email_verification_tokens` table mirrors `password_reset_tokens`.
+- **Admin-gated self-serve signup** — `instance_settings.allow_self_signup` (default off) plus a
+  configured email provider let anyone register by email: `POST /auth/signup` creates a pending
+  account and emails a verification link; `POST /auth/verify-email` activates it. Invitations
+  keep working regardless.
+- **Self-serve password reset** — `POST /auth/request-password-reset` emails a reset link to a
+  verified account (always a generic response, no enumeration); the existing
+  `POST /auth/reset-password` is unchanged.
+- **Outbound email dependency** — verification and reset messages are sent through the swappable
+  email module (Lettermint default, EuroMail alternative). Optional: with no provider configured
+  the email-dependent features stay unavailable rather than erroring.
