@@ -1,7 +1,7 @@
 # openkoutsi architecture
 
 **openkoutsi** is a self-hosted cycling coaching platform. You run it on your own hardware:
-upload FIT files or sync from Strava/Wahoo, track fitness metrics (CTL/ATL/TSB), build periodized
+upload FIT files or sync from Strava/Wahoo, track fitness metrics (fitness/fatigue/form), build periodized
 training plans, and get optional AI coaching feedback — all on a server you control.
 
 This site documents the platform's **architecture**: how the pieces fit together, where data
