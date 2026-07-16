@@ -29,18 +29,55 @@ model, and all instance-wide administration is handled by the instance admin.
 
 ## Onboarding
 
-Registration is **invite-only**:
+The first account always comes from the **setup wizard**; further accounts come from
+**invitations**, and — where an admin opts in — from **self-serve email signup**.
+
+### Invitations (always available)
 
 1. **First run** — the setup wizard creates the first **instance admin**. No team is created.
 2. An admin **issues an invitation** (instance-wide, no team association).
-3. A new user **registers** with the invite token; registration is rejected without a valid
-   instance-wide invitation.
+3. A new user **registers** (`POST /api/auth/register`) with the invite token, choosing a
+   **username**; registration is rejected without a valid instance-wide invitation.
+
+### Self-serve email signup (opt-in, default off)
+
+Because openkoutsi is self-hostable, self-serve signup is an admin-configurable runtime
+setting (`instance_settings.allow_self_signup`, default `false`) that also requires a
+configured [email provider](overview.md). When both are true, anyone can register with an
+**email** address:
+
+1. `POST /api/auth/signup` (email + password) creates a **pending** account and emails a
+   `…/verify-email?token=…` link. The response is always a generic acknowledgement, so the
+   endpoint never reveals whether an email is already registered.
+2. `POST /api/auth/verify-email` consumes the single-use, 1-hour token, sets
+   `users.email_verified_at`, and **activates** the account (creating its per-user DB and
+   athlete profile exactly like the invite path).
+
+Email is a **login identifier alongside username** — `users.email` is unique and nullable,
+so invited/legacy accounts keep logging in by username while signup accounts log in by their
+verified email. `login` accepts either. Invitations keep working regardless of the toggle;
+with no email provider configured, both signup and email password reset stay unavailable
+rather than erroring.
+
+### Password reset
+
+- **Self-serve (email configured):** `POST /api/auth/request-password-reset` emails a
+  `…/reset-password?token=…` link to a verified account. Always returns success (no account
+  enumeration).
+- **Admin-mediated (always):** `POST /api/admin/users/{id}/password-reset` mints the same link
+  for an admin to deliver out-of-band.
+
+Both consume the token via the unchanged `POST /api/auth/reset-password`. Verification and
+reset tokens share the single-use, SHA-256-hashed, 1-hour pattern
+(`email_verification_tokens` / `password_reset_tokens`).
 
 ```mermaid
 flowchart LR
     Setup["First-run setup<br/>→ first instance admin"] --> Invite["Admin issues<br/>instance-wide invite"]
     Invite --> Register["User registers<br/>with invite token"]
     Register --> Active["Active user<br/>(own per-user DB)"]
+    Signup["User signs up<br/>with email (if enabled)"] --> Verify["Verifies email<br/>via emailed link"]
+    Verify --> Active
 ```
 
 ## Consent

@@ -82,4 +82,4 @@ retention policy are defined in the
 | FIT parsing | `fitdecode` (via the `openkoutsi` core library) |
 | Frontend | Next.js 15 · TypeScript · Tailwind CSS · Recharts |
 | Packaging | `uv` (Python) · `npm` (web) |
-| Integrations | Strava & Wahoo OAuth + webhook bridges; optional OpenAI-compatible LLM |
+| Integrations | Strava & Wahoo OAuth + webhook bridges; optional OpenAI-compatible LLM; optional transactional email (Lettermint / EuroMail, EU-based) for signup verification + password reset |
