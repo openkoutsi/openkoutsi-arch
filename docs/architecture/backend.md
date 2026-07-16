@@ -20,11 +20,11 @@ flowchart TD
   via Pydantic **schemas** (`backend/app/schemas/*`), resolve the authenticated user, and
   delegate to services. Mounted under `/api` by `backend/main.py`.
 - **Services** (`backend/app/services/*`) — application logic: the provider-sync pipeline,
-  `metrics_engine` (CTL/ATL/TSB), the [LLM features](llm.md) (`llm_activity_analyzer`,
+  `metrics_engine` (fitness/fatigue/form), the [LLM features](llm.md) (`llm_activity_analyzer`,
   `llm_plan_generator`, `llm_workout_generator`, `llm_training_status_analyzer`, and the shared
   `llm_client`), the `activity_workout_matcher`, `pr_detection`, and `notifications`.
 - **Core library** (`openkoutsi/`) — framework-agnostic domain code with no FastAPI or DB
-  imports: `fit`/`fit_processing` (FIT decoding), `training_math` (TSS, normalized power,
+  imports: `fit`/`fit_processing` (FIT decoding), `training_math` (training load, weighted power,
   power/distance bests), `categorization` (Coggan zone classification), `plan_builder`,
   `workout_schema`, and the `workout_formats/` exporters (Zwift `.zwo`, FIT workout, Wahoo plan).
 - **ORM models** (`backend/app/models/*`) — SQLAlchemy 2 async models split across the registry
@@ -103,7 +103,7 @@ Once a source is attached, the pipeline fills in the activity:
 
 - **FIT-first** (Wahoo and any FIT-capable provider): download the FIT, store it
   **encrypted on disk** under the user's directory, parse it with the core library, and compute
-  normalized power, TSS, intensity factor, zone/category, power/distance bests, streams, and
+  weighted power, training load, intensity, zone/category, power/distance bests, streams, and
   intervals.
 - **Stream-based fallback** (Strava): pull the activity streams from the API and compute the
   same metrics from those samples.

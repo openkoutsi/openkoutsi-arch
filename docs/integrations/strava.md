@@ -34,7 +34,7 @@ loops).
 
 Import uses the **stream-based** path of the [provider sync pipeline](../architecture/backend.md):
 the activity's power/HR/cadence/speed/altitude streams are fetched from the Strava API and used
-to compute normalized power, TSS, intensity factor, category, streams, and bests.
+to compute weighted power, training load, intensity, category, streams, and bests.
 
 - **Source priority:** `strava` = **3** (a Wahoo FIT for the same ride, priority 2, would win
   and repopulate the activity).

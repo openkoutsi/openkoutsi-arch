@@ -60,7 +60,7 @@ All read-only analytics live under `/metrics`:
 | `GET /metrics/bests/{kind}` (`distance` \| `power`) | Best efforts for the given kind |
 | `GET /metrics/ftp` | Current FTP estimate |
 | `GET /metrics/ftp/history` | FTP history |
-| `GET /metrics/fitness`, `/metrics/fitness/current` | CTL/ATL/TSB series and current values |
+| `GET /metrics/fitness`, `/metrics/fitness/current` | fitness/fatigue/form series and current values |
 
 ### 7. Provider-agnostic push actions
 
