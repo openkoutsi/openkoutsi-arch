@@ -87,7 +87,12 @@ Everything a single athlete owns — **one athlete per database**:
   `llm_api_key_set` boolean). A non-empty `llm_base_url` means BYOK is active and only the user's
   own config is used (the [no-mixing rule](llm.md#resolving-one-request)).
 - All **activities** with their `ActivitySource`, `ActivityStream`, `ActivityInterval`, and
-  `ActivityPowerBest` / `ActivityDistanceBest` rows.
+  `ActivityPowerBest` / `ActivityDistanceBest` rows. Each activity also carries a
+  `zone_times` snapshot (JSON — `{"hr": {"Z1": secs, …}, "power": {…}}`) accumulated from its
+  per-second streams **at processing time, using the athlete's zones as they were then**. The
+  snapshot is **frozen** once written: editing zones later only changes future activities, so
+  historical weekly zone distributions stay stable. Legacy activities without a snapshot are
+  backfilled on first read (using current zones) and then frozen.
 - **goals**, training **plans** (with planned workouts), and standalone **workout** definitions.
   Each goal also carries on-demand AI-guidance columns (`guidance`, `guidance_verdict`,
   `guidance_status`, `guidance_updated_at`) — the streamed coach prose, its parsed

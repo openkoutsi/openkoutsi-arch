@@ -104,8 +104,9 @@ Once a source is attached, the pipeline fills in the activity:
 
 - **FIT-first** (Wahoo and any FIT-capable provider): download the FIT, store it
   **encrypted on disk** under the user's directory, parse it with the core library, and compute
-  weighted power, training load, intensity, zone/category, power/distance bests, streams, and
-  intervals.
+  weighted power, training load, intensity, zone/category, power/distance bests, streams,
+  intervals, and a frozen per-activity `zone_times` snapshot (time-in-zone for power + HR,
+  using the athlete's zones at processing time — see [data model](data-model.md)).
 - **Stream-based fallback** (Strava): pull the activity streams from the API and compute the
   same metrics from those samples.
 

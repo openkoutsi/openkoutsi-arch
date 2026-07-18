@@ -61,6 +61,12 @@ All read-only analytics live under `/metrics`:
 | `GET /metrics/ftp` | Current FTP estimate |
 | `GET /metrics/ftp/history` | FTP history |
 | `GET /metrics/fitness`, `/metrics/fitness/current` | fitness/fatigue/form series and current values |
+| `GET /metrics/zones/{activity_id}` | Frozen per-activity time-in-zone snapshot (power + HR) |
+| `GET /metrics/zones/weekly` | Accumulated time-in-zone per ISO week over a period (power + HR) |
+
+!!! note
+    `/metrics/zones/weekly` is declared before `/metrics/zones/{activity_id}` so the literal
+    `weekly` segment isn't captured as an activity id.
 
 ### 7. Provider-agnostic push actions
 
