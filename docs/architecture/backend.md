@@ -161,6 +161,10 @@ matcher gate and the score cannot drift apart.
 Scores are surfaced on `PlannedWorkoutResponse.match_score` and `TrainingPlanResponse`
 (`adherence_score` + summary), and persisted as a **`plan_adherence_daily`** snapshot per active
 plan per day for charting via `GET /plans/{id}/adherence`. `catch_up_adherence` (mirroring
-`catch_up_metrics`) backfills snapshots; recompute piggybacks the daily first-read hook and the
-manual/webhook ingest paths — the Strava/Wahoo syncs now also auto-link ingested activities to
-planned workouts so adherence does not silently under-count.
+`catch_up_metrics`) recomputes every day in `[start_date, today]` for each active plan and
+rewrites any snapshot that is missing **or stale** — self-healing stored days invalidated by
+retroactive changes (a link/unlink to an old workout, an edited past workout, a formula change),
+while leaving matching days untouched so the pass stays idempotent. It reads with
+`populate_existing` so it always scores against current DB state. Recompute piggybacks the daily
+first-read hook and the manual/webhook ingest paths — the Strava/Wahoo syncs now also auto-link
+ingested activities to planned workouts so adherence does not silently under-count.
