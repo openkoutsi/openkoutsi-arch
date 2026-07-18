@@ -22,7 +22,8 @@ flowchart TD
 - **Services** (`backend/app/services/*`) — application logic: the provider-sync pipeline,
   `metrics_engine` (fitness/fatigue/form), the [LLM features](llm.md) (`llm_activity_analyzer`,
   `llm_plan_generator`, `llm_workout_generator`, `llm_training_status_analyzer`, and the shared
-  `llm_client`), the `activity_workout_matcher`, `pr_detection`, and `notifications`.
+  `llm_client`), the `activity_workout_matcher`, `plan_adherence` (deterministic plan-adherence
+  scoring), `pr_detection`, and `notifications`.
 - **Core library** (`openkoutsi/`) — framework-agnostic domain code with no FastAPI or DB
   imports: `fit`/`fit_processing` (FIT decoding), `training_math` (training load, weighted power,
   power/distance bests), `categorization` (Coggan zone classification), `plan_builder`,
@@ -110,3 +111,56 @@ Once a source is attached, the pipeline fills in the activity:
 
 OAuth tokens are refreshed transparently before expiry (`ensure_fresh_token`), with
 provider-specific lookahead windows — see the per-provider pages.
+
+## Deterministic metrics: fitness and plan adherence
+
+Two families of scores are computed by **plain arithmetic** in the core library and orchestrated
+by services — never by the LLM, so they are always-on and **not gated behind the LLM
+subscription**. The LLM daily training status may *reference* the numbers, but is not their source.
+
+### Fitness / Fatigue / Form
+
+`metrics_engine` applies the Banister impulse-response model (`openkoutsi.fatigue_metrics`) over
+daily training Load, persisting a `daily_metrics` snapshot per day. `catch_up_metrics` backfills
+missing days and repairs rows made stale by deleted activities.
+
+### Plan adherence scoring
+
+Sits beside `activity_workout_matcher` and `metrics_engine`:
+
+- **Pure math** — `openkoutsi/plan_adherence.py` (no FastAPI/DB imports).
+- **Orchestration** — `backend/app/services/plan_adherence.py` (reads workouts + linked
+  activities, rolls up the plan score, persists the snapshot).
+
+Two scores are produced:
+
+1. **Per-workout match score (0–100)** — how well the linked activity/activities fulfilled one
+   planned workout. Since a workout may be satisfied by **several** linked activities, scoring
+   operates on the **summed** actuals.
+   - *Cycling* — graded on Load + duration with a symmetric per-dimension deviation
+     `dim_score = clamp(1 − |actual − target| / target, 0, 1)` (on target → 1.0; 20% off either way
+     → 0.8; ≥100% over or 0 → 0.0), blended `score = 100 × (0.70 × load_score + 0.30 ×
+     duration_score)` when both targets exist, else whichever exists, else completion-only.
+   - *Supplemental (non-cycling)* — done/missed (100 if ≥1 activity linked, else a miss).
+2. **Plan adherence score (0–100)** — a Load-weighted roll-up over the *elapsed* portion of the
+   plan: `adherence = 100 × Σ(weight_i × score_i / 100) / Σ(weight_i)`. Weight is `target_load`
+   for cycling (fallback `duration_min`); supplemental workouts get a flat weight
+   `0.75 × mean(cycling target_load)` (fallback `30`). Workout states:
+   - **Completed** → the match score at full weight.
+   - **Skipped** → score 0 at partial weight `(1 − f) × weight`, where the skip reason maps to a
+     fixed forgiveness factor `f` (illness/injury `0.90`, fatigue `0.60`, travel `0.50`, weather
+     `0.40`; unrecognized/free-form/none `0.10`) — a plain lookup, no free-text parsing.
+   - **Missed** (past, empty, not a rest day) → score 0 at full weight.
+   - **Rest day / future** → excluded. **Today** → scored provisionally if an activity is linked,
+     otherwise held in grace until the day rolls over.
+
+The 60% auto-match threshold in `activity_workout_matcher._matches` and the deviation used by the
+score both draw on the shared `meets_threshold` comparison in `openkoutsi.plan_adherence`, so the
+matcher gate and the score cannot drift apart.
+
+Scores are surfaced on `PlannedWorkoutResponse.match_score` and `TrainingPlanResponse`
+(`adherence_score` + summary), and persisted as a **`plan_adherence_daily`** snapshot per active
+plan per day for charting via `GET /plans/{id}/adherence`. `catch_up_adherence` (mirroring
+`catch_up_metrics`) backfills snapshots; recompute piggybacks the daily first-read hook and the
+manual/webhook ingest paths — the Strava/Wahoo syncs now also auto-link ingested activities to
+planned workouts so adherence does not silently under-count.
