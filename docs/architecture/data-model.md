@@ -93,6 +93,13 @@ Everything a single athlete owns — **one athlete per database**:
   `guidance_status`, `guidance_updated_at`) — the streamed coach prose, its parsed
   `realistic`/`ambitious`/`unrealistic` verdict, and the pending/done/error state with a
   timestamp for pending-timeout recovery (mirroring the athlete's `training_status*` columns).
+  A planned workout can be satisfied by **several** activities via the
+  `planned_workout_activities` join table.
+- Deterministic **daily snapshots**: `daily_metrics` (fitness/fatigue/form + daily Load) and
+  `plan_adherence_daily`. The latter, keyed by `(athlete_id, plan_id, date)`, stores the plan's
+  "so far" adherence `score` (Float, nullable) plus denormalized counts (`completed`, `missed`,
+  `skipped`, `pending`) — one snapshot per active plan per day, same shape/pattern as
+  `daily_metrics`. The per-workout match score is **derived on read**, not stored.
 - The user's **message inbox**.
 
 The schema is created idempotently, so an existing message-only DB simply gains the training
