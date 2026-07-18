@@ -142,6 +142,11 @@ Two scores are produced:
      → 0.8; ≥100% over or 0 → 0.0), blended `score = 100 × (0.70 × load_score + 0.30 ×
      duration_score)` when both targets exist, else whichever exists, else completion-only.
    - *Supplemental (non-cycling)* — done/missed (100 if ≥1 activity linked, else a miss).
+   - A **completed** workout is floored at `COMPLETED_MIN_SCORE = 50` — a session that was
+     actually done, however far off target (e.g. an 85-min endurance ride ridden as a 4-hour
+     Z1/Z2 spin), never scores as low as an outright miss. The floor is applied at the service
+     layer (`workout_match_score`); the pure per-dimension math stays unfloored. Missed and
+     skipped workouts are unaffected.
 2. **Plan adherence score (0–100)** — a Load-weighted roll-up over the *elapsed* portion of the
    plan: `adherence = 100 × Σ(weight_i × score_i / 100) / Σ(weight_i)`. Weight is `target_load`
    for cycling (fallback `duration_min`); supplemental workouts get a flat weight
