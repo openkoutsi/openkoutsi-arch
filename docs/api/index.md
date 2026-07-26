@@ -12,7 +12,7 @@ contract that is consistent and predictable across every resource.
 ## Tags
 
 Operations are grouped by tag: `auth`, `athlete`, `activities`, `metrics`, `goals`, `plans`,
-`workouts`, `integrations`, `messages`, `admin`, and `public`.
+`workouts`, `achievements`, `integrations`, `messages`, `admin`, and `public`.
 
 ## Conventions
 

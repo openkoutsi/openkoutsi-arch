@@ -105,6 +105,16 @@ Everything a single athlete owns — **one athlete per database**:
   "so far" adherence `score` (Float, nullable) plus denormalized counts (`completed`, `missed`,
   `skipped`, `pending`) — one snapshot per active plan per day, same shape/pattern as
   `daily_metrics`. The per-workout match score is **derived on read**, not stored.
+- Earned **achievement tiers** in `achievement_unlocks`, keyed by
+  `(athlete_id, achievement_id, tier)`. Derived state like the snapshots above, with two
+  differences worth noting. First, the **catalogue lives in code** (`openkoutsi.achievements`), not
+  in rows — `achievement_id` is a stable machine key whose display name is an i18n string in the
+  web app, so no user-facing prose is stored and adding an achievement needs no migration. Second,
+  the reconcile pass **deletes as well as inserts**: unlocks are a pure function of the athlete's
+  current data, so removing the activity that earned a tier revokes it rather than leaving a badge
+  the history no longer supports. The two timestamps do different jobs — `achieved_on` is derived
+  from the history (back-filling an old ride moves it *earlier*, never to today), while
+  `created_at` is wall-clock and only drives the "new" marker and the inbox notification.
 - The user's **message inbox**.
 
 The schema is created idempotently, so an existing message-only DB simply gains the training
