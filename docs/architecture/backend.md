@@ -125,6 +125,41 @@ subscription**. The LLM daily training status may *reference* the numbers, but i
 daily training Load, persisting a `daily_metrics` snapshot per day. `catch_up_metrics` backfills
 missing days and repairs rows made stale by deleted activities.
 
+### Forecasting Fitness / Fatigue / Form
+
+`metrics_forecast` runs the **same** pure function forwards. `compute_daily_metrics` is just a
+recurrence over a `{date: Load}` dict, so projecting the model is a new caller rather than new
+math: where `metrics_engine` feeds it `Activity.load` for processed activities, the forecast feeds
+it `PlannedWorkout.target_load` for the days ahead. Served by `GET /api/metrics/fitness/forecast`.
+
+- **Seed** — the endpoint runs `catch_up_metrics` first, exactly as the dashboard does, so the seed
+  is normally today's `daily_metrics` row (`0/0` with no history). Without that, the answer would
+  depend on whether the client had hit `POST /metrics/catch-up` beforehand. Projection then runs
+  from the day *after* the seed; rows up to and including today are dropped, so the measured series
+  stays authoritative for everything it covers.
+- **Bridging a stale seed** — when the seed still predates today, the gap is projected from the
+  plan like any other day: the planned-load window starts at the seed, **not** at today. A window
+  starting at today would decay the gap as pure rest even where the plan prescribes work, and the
+  resulting error is one-directional — the athlete looks *fresher* than they are, the one direction
+  that matters for "will I be fresh on race day?". The bridge is bounded to 180 days (as in
+  `metrics_engine`'s recalculation lookback); beyond it the honest seed is `0/0`.
+- **Date resolution** — `PlannedWorkout` stores `(week_number, day_of_week)`, not a date, so each
+  workout is placed via the shared `plan_adherence.workout_date` helper relative to its plan's
+  `start_date`. Plans with no `start_date` can't be placed on a calendar and are skipped.
+- **Multiple active plans** — creating a plan only archives *overlapping* active ones, so several
+  can be active simultaneously and two can contribute to the same day around a boundary. Loads are
+  **summed** across active plans rather than one plan being picked; archived plans are excluded.
+- **Rest and the tail** — days with no prescribed workout (and workouts with no `target_load`)
+  contribute zero and therefore decay, and the projection continues past `plan.end_date` out to
+  the horizon rather than stopping there.
+
+**Nothing is persisted.** This is the deliberate difference from `daily_metrics` and
+`plan_adherence_daily`: a forecast is only as good as the plan it was derived from, so any stored
+copy is invalidated by every plan edit and would need the same self-healing staleness detection
+those tables needed. Recomputing is a few hundred iterations of a two-line recurrence, so it is
+computed on read instead — which also means no table, no migration, and no way for the projection
+to disagree with the plan.
+
 ### Plan adherence scoring
 
 Sits beside `activity_workout_matcher` and `metrics_engine`:
