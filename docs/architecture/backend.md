@@ -132,10 +132,17 @@ recurrence over a `{date: Load}` dict, so projecting the model is a new caller r
 math: where `metrics_engine` feeds it `Activity.load` for processed activities, the forecast feeds
 it `PlannedWorkout.target_load` for the days ahead. Served by `GET /api/metrics/fitness/forecast`.
 
-- **Seed** — the most recent `daily_metrics` row up to today (`0/0` with no history). Projection
-  runs from the day *after* the seed, so a stale seed (catch-up not yet run) is bridged by
-  zero-load decay instead of skipping days; rows up to and including today are then dropped, and
-  the measured series stays authoritative for everything it covers.
+- **Seed** — the endpoint runs `catch_up_metrics` first, exactly as the dashboard does, so the seed
+  is normally today's `daily_metrics` row (`0/0` with no history). Without that, the answer would
+  depend on whether the client had hit `POST /metrics/catch-up` beforehand. Projection then runs
+  from the day *after* the seed; rows up to and including today are dropped, so the measured series
+  stays authoritative for everything it covers.
+- **Bridging a stale seed** — when the seed still predates today, the gap is projected from the
+  plan like any other day: the planned-load window starts at the seed, **not** at today. A window
+  starting at today would decay the gap as pure rest even where the plan prescribes work, and the
+  resulting error is one-directional — the athlete looks *fresher* than they are, the one direction
+  that matters for "will I be fresh on race day?". The bridge is bounded to 180 days (as in
+  `metrics_engine`'s recalculation lookback); beyond it the honest seed is `0/0`.
 - **Date resolution** — `PlannedWorkout` stores `(week_number, day_of_week)`, not a date, so each
   workout is placed via the shared `plan_adherence.workout_date` helper relative to its plan's
   `start_date`. Plans with no `start_date` can't be placed on a calendar and are skipped.
