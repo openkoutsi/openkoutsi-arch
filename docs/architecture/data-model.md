@@ -93,6 +93,22 @@ Everything a single athlete owns — **one athlete per database**:
   snapshot is **frozen** once written: editing zones later only changes future activities, so
   historical weekly zone distributions stay stable. Legacy activities without a snapshot are
   backfilled on first read (using current zones) and then frozen.
+
+    Activities also carry **aerobic response metrics** (issue #37). Two of them are *not*
+    stored: `efficiency_factor` (weighted power / avg HR) and `variability_index` (weighted /
+    avg power) are pure ratios of columns already on the row, so they are **derived on read**
+    in the response schema — the same reasoning as the per-workout match score above. Nothing
+    can drift out of sync with its operands, and activities processed long before the feature
+    existed carry both without a reprocess. Stored are the ones that need the streams or a
+    point-in-time fit: `decoupling_pct` with a companion `decoupling_reason` (exactly one is
+    set — a decoupling figure over a short or interval ride is noise, so the gate stores a
+    stable reason code instead of a number), plus a `cp_w` / `w_prime_j` snapshot. That
+    snapshot is fit from the athlete's rank-1 power bests **as of the activity's own date**,
+    not all-time, and is **frozen** for the same reason `zone_times` is: a ride's W′ story
+    shouldn't silently change as the athlete's power curve moves. W′ balance itself is an
+    `ActivityStream` row (`stream_type="w_bal"`, joules per second), following the `torque`
+    precedent including its reprocess backfill. When CP can't be fit, both columns stay NULL
+    and no stream is written — no W′ is invented.
 - **goals**, training **plans** (with planned workouts), and standalone **workout** definitions.
   Each goal also carries on-demand AI-guidance columns (`guidance`, `guidance_verdict`,
   `guidance_status`, `guidance_updated_at`) — the streamed coach prose, its parsed

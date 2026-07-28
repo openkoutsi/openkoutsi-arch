@@ -105,8 +105,15 @@ Once a source is attached, the pipeline fills in the activity:
 - **FIT-first** (Wahoo and any FIT-capable provider): download the FIT, store it
   **encrypted on disk** under the user's directory, parse it with the core library, and compute
   weighted power, training load, intensity, zone/category, power/distance bests, streams,
-  intervals, and a frozen per-activity `zone_times` snapshot (time-in-zone for power + HR,
-  using the athlete's zones at processing time — see [data model](data-model.md)).
+  intervals, a frozen per-activity `zone_times` snapshot (time-in-zone for power + HR,
+  using the athlete's zones at processing time — see [data model](data-model.md)), and the
+  aerobic response metrics: aerobic decoupling (or a reason code explaining why one would
+  mislead), a frozen CP/W′ snapshot, and the derived `w_bal` stream.
+
+    The aerobic step runs **after** the power bests are written, so the CP fit — restricted to
+    bests as of the activity's own date — sees the ride's own efforts. It lives in
+    `services/aerobic_metrics.py` rather than inline, because the reprocess endpoint runs the
+    identical step to backfill older activities and the two must not drift.
 - **Stream-based fallback** (Strava): pull the activity streams from the API and compute the
   same metrics from those samples.
 

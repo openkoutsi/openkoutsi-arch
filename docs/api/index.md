@@ -61,6 +61,7 @@ All read-only analytics live under `/metrics`:
 | `GET /metrics/ftp` | Current FTP estimate |
 | `GET /metrics/ftp/history` | FTP history |
 | `GET /metrics/fitness`, `/metrics/fitness/current` | fitness/fatigue/form series and current values |
+| `GET /metrics/efficiency` | Aerobic efficiency trend over steady endurance rides (derived on read) |
 | `GET /metrics/zones/{activity_id}` | Frozen per-activity time-in-zone snapshot (power + HR) |
 | `GET /metrics/zones/weekly` | Accumulated time-in-zone per ISO week over a period (power + HR) |
 
