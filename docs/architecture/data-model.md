@@ -102,7 +102,11 @@ Everything a single athlete owns — **one athlete per database**:
     existed carry both without a reprocess. Stored are the ones that need the streams or a
     point-in-time fit: `decoupling_pct` with a companion `decoupling_reason` (exactly one is
     set — a decoupling figure over a short or interval ride is noise, so the gate stores a
-    stable reason code instead of a number), plus a `cp_w` / `w_prime_j` snapshot. That
+    stable reason code instead of a number), plus a `cp_w` / `w_prime_j` / `cp_fit_points`
+    snapshot. `cp_fit_points` records how many duration bests that fit had available: a
+    provider backlog import walks newest-first, so an old ride can be processed while almost
+    nothing on or before its date exists yet, and this keeps those rides findable for a future
+    re-fit rather than indistinguishable from a well-supported one. That
     snapshot is fit from the athlete's rank-1 power bests **as of the activity's own date**,
     not all-time, and is **frozen** for the same reason `zone_times` is: a ride's W′ story
     shouldn't silently change as the athlete's power curve moves. W′ balance itself is an

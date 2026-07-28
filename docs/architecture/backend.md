@@ -112,8 +112,17 @@ Once a source is attached, the pipeline fills in the activity:
 
     The aerobic step runs **after** the power bests are written, so the CP fit — restricted to
     bests as of the activity's own date — sees the ride's own efforts. It lives in
-    `services/aerobic_metrics.py` rather than inline, because the reprocess endpoint runs the
-    identical step to backfill older activities and the two must not drift.
+    `services/aerobic_metrics.py` rather than inline because **four** paths populate an activity
+    from streams: manual FIT upload, the reprocess endpoint, and both provider paths above. The
+    invariant they must all uphold — exactly one of `decoupling_pct` / `decoupling_reason` is
+    set — is asserted per path in `tests/unit/test_writer_path_invariants.py`, so a fifth writer
+    fails loudly instead of silently shipping nulls.
+
+    A fit that lands outside physiologically plausible bounds is rejected outright rather than
+    stored: the linear work–time model's intercept is unconstrained, so a rider who only rides
+    steady routinely fits a negative or near-zero W'. Rejecting at the fit keeps "no CP → no
+    columns, no stream" as the single failure mode, so the stored columns can never disagree
+    with the presence of the stream.
 - **Stream-based fallback** (Strava): pull the activity streams from the API and compute the
   same metrics from those samples.
 
