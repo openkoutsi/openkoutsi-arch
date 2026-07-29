@@ -123,6 +123,26 @@ Once a source is attached, the pipeline fills in the activity:
     steady routinely fits a negative or near-zero W'. Rejecting at the fit keeps "no CP → no
     columns, no stream" as the single failure mode, so the stored columns can never disagree
     with the presence of the stream.
+    The `zone_times` snapshot is read back by more than the weekly chart: the three-band
+    intensity distribution (issue #38) aggregates it over a block. That reader is why zone
+    lists are now **fixed at seven power and five HR zones**, validated in `AthleteUpdate`
+    and enforced on the provider sync path, which skips a non-conforming list rather than
+    reshaping it. The band mapping is positional — Z1–Z2 below LT1, Z3–Z4 between the
+    thresholds, Z5 and up above LT2 — so the thresholds come from the athlete's own zone
+    boundaries and no "LT1 = 0.75 × FTP" constant exists anywhere. With a variable-length
+    list that mapping would have had to infer band boundaries from watts, and a renamed or
+    truncated list would have silently changed what a zone meant.
+
+    Two properties of the snapshot constrain any reader of it. It is **partial** — only the
+    zones the ride actually touched are keys — so zone position must come from the number in
+    the zone's name, never from the key's index among those present; an easy ride storing
+    three keys is not a three-zone athlete. And it carries **no record of the FTP it was
+    frozen against**, so a block-length aggregate can mix vintages. That is detected rather
+    than ignored: the distribution flags a window where the recorded FTP changed value, or
+    where one zone number appears under two different names. A pure boundary change that kept
+    the names is not detectable from snapshots alone, which is why the flag is documented as
+    "treat as approximate" rather than as a consistency proof.
+
 - **Stream-based fallback** (Strava): pull the activity streams from the API and compute the
   same metrics from those samples.
 

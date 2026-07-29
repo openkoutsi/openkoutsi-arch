@@ -64,10 +64,20 @@ All read-only analytics live under `/metrics`:
 | `GET /metrics/efficiency` | Aerobic efficiency trend over steady endurance rides (derived on read) |
 | `GET /metrics/zones/{activity_id}` | Frozen per-activity time-in-zone snapshot (power + HR) |
 | `GET /metrics/zones/weekly` | Accumulated time-in-zone per ISO week over a period (power + HR) |
+| `GET /metrics/intensity-distribution` | Three-band distribution and its shape over a block (derived on read) |
 
 !!! note
     `/metrics/zones/weekly` is declared before `/metrics/zones/{activity_id}` so the literal
     `weekly` segment isn't captured as an activity id.
+
+`/metrics/intensity-distribution` takes the usual `start` / `end` / `days` triple, but unlike its
+siblings an unspecified window is **not** all of history — it defaults to 84 days, because a
+distribution over every ride ever recorded answers nothing. `method=time|session` picks the
+counting unit and `basis=power|hr` the zone set (`basis` is ignored, and echoed as `null`, for
+`method=session`). Both are echoed back: the two methods legitimately disagree, so a response
+that didn't state which one produced it would be unusable. The response also carries coverage
+counts and a `zone_definitions_changed` flag, so a caller can tell a well-founded distribution
+from one drawn from six rides across two different FTPs.
 
 ### 7. Provider-agnostic push actions
 

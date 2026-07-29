@@ -92,7 +92,11 @@ Everything a single athlete owns — **one athlete per database**:
   per-second streams **at processing time, using the athlete's zones as they were then**. The
   snapshot is **frozen** once written: editing zones later only changes future activities, so
   historical weekly zone distributions stay stable. Legacy activities without a snapshot are
-  backfilled on first read (using current zones) and then frozen.
+  backfilled on first read (using current zones) and then frozen. Note the snapshot only holds
+  the zones a ride actually reached, so a missing key means "never went there", not "no such
+  zone". The athlete's own `hr_zones` / `power_zones` are fixed-length — **five** and **seven**
+  entries — which is what lets the three-band intensity distribution read them by position;
+  snapshots frozen before that rule are left as they are and mapped proportionally.
 
     Activities also carry **aerobic response metrics** (issue #37). Two of them are *not*
     stored: `efficiency_factor` (weighted power / avg HR) and `variability_index` (weighted /
