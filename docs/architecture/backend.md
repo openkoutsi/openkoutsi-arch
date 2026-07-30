@@ -133,15 +133,39 @@ Once a source is attached, the pipeline fills in the activity:
     list that mapping would have had to infer band boundaries from watts, and a renamed or
     truncated list would have silently changed what a zone meant.
 
+    Because the mapping is positional, the thing that carries a zone's position to every
+    reader is its **name** — `time_in_zones` keys the frozen snapshot by it. Names are
+    therefore **normalised on write** rather than validated: `AthleteUpdate` overwrites them
+    with the canonical labels, and the provider sync path (which assigns provider dicts
+    straight to the model, bypassing `ZoneSchema`) relabels them too. Validating count and
+    ordering while leaving the name free-form enforced everything except the field the
+    invariant actually rests on. Zone lists must also be **contiguous**: a value falling in a
+    gap belongs to no zone, and `Zones.getZone` used to attribute it to the *top* one.
+
     Two properties of the snapshot constrain any reader of it. It is **partial** — only the
-    zones the ride actually touched are keys — so zone position must come from the number in
-    the zone's name, never from the key's index among those present; an easy ride storing
-    three keys is not a three-zone athlete. And it carries **no record of the FTP it was
-    frozen against**, so a block-length aggregate can mix vintages. That is detected rather
-    than ignored: the distribution flags a window where the recorded FTP changed value, or
-    where one zone number appears under two different names. A pure boundary change that kept
-    the names is not detectable from snapshots alone, which is why the flag is documented as
-    "treat as approximate" rather than as a consistency proof.
+    zones the ride actually touched are keys — so zone position comes from the number in the
+    zone's name, never from the key's index among those present; an easy ride storing three
+    keys is not a three-zone athlete. Names are parsed with an **anchored** pattern and a
+    bound on the number, and a snapshot carrying a name that can't be placed is dropped
+    whole rather than guessed at: an unanchored parse read `VO2max` as zone 2 and
+    `Sweet Spot 88-94%` as zone 88, the latter rescaling the band boundaries for every other
+    zone in the same snapshot. Snapshots predating normalisation still hold whatever the
+    athlete typed, so the parser cannot assume the invariant it now enforces.
+
+    The snapshot also carries **no record of the FTP it was frozen against**, so a
+    block-length aggregate can mix vintages. That is detected rather than ignored: the
+    distribution flags a window where the recorded FTP changed value, or where one zone
+    number appears under two different names. A pure boundary change that kept the names is
+    not detectable from snapshots alone, which is why the flag is documented as "treat as
+    approximate" rather than as a consistency proof.
+
+    Reading a distribution performs **no writes**. The service is called from request
+    handlers and from two LLM paths, one of which (`regenerate_plan` →
+    `generate_plan_weeks_llm`) runs on a session carrying flushed-but-uncommitted deletions
+    of a plan's workouts, left uncommitted precisely so an LLM failure rolls them back. A
+    commit inside the read path would make them permanent before the LLM was called. Freezing
+    missing snapshots is a separate, explicit call that only the endpoint makes, where the
+    transaction is owned.
 
 - **Stream-based fallback** (Strava): pull the activity streams from the API and compute the
   same metrics from those samples.
