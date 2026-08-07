@@ -37,15 +37,24 @@ flowchart TD
 origin, a security-headers middleware, and a rate limiter), and includes every router. On
 startup its lifespan handler initializes the registry database and the separate
 [LLM-usage database](data-model.md) (see the [subscription gate & usage tracking](llm.md#subscription-gating-usage-tracking-issue-9)),
-then launches the two **background pollers** as asyncio tasks:
+then launches the **periodic background tasks** as asyncio tasks:
 
 ```python
-strava_poller = asyncio.create_task(strava_bridge_poller())
-wahoo_poller  = asyncio.create_task(wahoo_bridge_poller())
+background = [
+    asyncio.create_task(strava_bridge_poller()),
+    asyncio.create_task(wahoo_bridge_poller()),
+    asyncio.create_task(pat_expiry_sweeper()),
+]
 ```
 
-Each poller loops every 60 seconds, fetches pending events from its bridge, processes them, and
-claims them. See [Integrations](../integrations/index.md).
+Each bridge poller loops every 60 seconds, fetches pending events from its bridge, processes
+them, and claims them. See [Integrations](../integrations/index.md).
+
+The **token-expiry sweep** loops daily and warns users whose
+[personal access tokens](auth.md#personal-access-tokens) are about to expire. Periodic work here
+is `lifespan` asyncio tasks rather than a scheduler dependency, which is why that feature needed
+no new one — and why it inherits the pollers' **single-process assumption**: two app processes
+would double-notify, and the `last_expiry_notice` column is the mitigation.
 
 ## The provider sync pipeline
 
