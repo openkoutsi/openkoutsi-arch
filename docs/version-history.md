@@ -101,3 +101,27 @@ Feature deltas layered onto v2 after the initial collapse.
 - **Outbound email dependency** — verification and reset messages are sent through the swappable
   email module (Lettermint default, EuroMail alternative). Optional: with no provider configured
   the email-dependent features stay unavailable rather than erroring.
+
+## Notable v2 removals
+
+Breaking changes to the published v2 API, recorded here because there is no deprecation
+window for them.
+
+### API — the LLM chat proxy was removed
+
+`POST /api/llm/chat` is **gone** (issue #45). It was a general-purpose passthrough: it took a
+client-supplied `messages` array and forwarded it to the caller's resolved LLM, streaming or
+one-shot. Alongside it went the `LlmChatRequest` and `ChatMessage` schemas, and with them the
+last `text/event-stream` response in the API.
+
+It was removed rather than deprecated because a client that supplies the message array
+**controls the system prompt** — which would make the coach-scope and medical-boundary
+guardrails removable by anyone holding an access token. It had been kept as the intended
+foundation for conversational features; that work concluded the opposite, and builds its
+messages server-side like every other AI feature.
+
+The removal is breaking in principle only: the endpoint was never wired to a UI, never
+documented for users, and has no known consumers — the frontend's own
+`src/lib/llm.ts` explicitly noted that the browser must not call it. The BYOK configuration
+endpoints (`/access`, `/models`, `/servers`, `/test-connection`, `/test-my-connection`) are
+unaffected, as are the SSRF defences shared with the remaining outbound paths.

@@ -2,8 +2,8 @@
 
 openkoutsi's coaching intelligence is delivered by a language model, but the platform
 deliberately **owns no model and hard-codes no provider**. Every AI feature is built on a small,
-uniform abstraction: an **OpenAI-compatible chat-completions API** reached through a
-server-side proxy. Anything that speaks that dialect — a local
+uniform abstraction: an **OpenAI-compatible chat-completions API** called server-to-server,
+never from the browser. Anything that speaks that dialect — a local
 [Ollama](https://ollama.com/) instance, a hosted OpenAI-compatible endpoint, or a gateway in
 front of several providers — can be plugged in without code changes.
 
@@ -12,7 +12,8 @@ action, nothing is ever sent to a model and every other feature keeps working.
 
 ## The features
 
-Five services under `backend/app/services/` use the LLM, plus one pass-through proxy:
+Five services under `backend/app/services/` use the LLM. Every one of them builds its own
+prompt server-side; there is no general-purpose passthrough:
 
 | Feature | Service | Shape |
 |---|---|---|
@@ -21,15 +22,23 @@ Five services under `backend/app/services/` use the LLM, plus one pass-through p
 | **Goal guidance** | `llm_goal_guidance` | Streaming prose |
 | **AI plan generation** | `llm_plan_generator` | One-shot JSON |
 | **AI workout generation** | `llm_workout_generator` | One-shot JSON |
-| **Chat proxy** | `POST /api/llm/chat` (`backend/app/api/llm.py`) | Streaming or one-shot, general-purpose |
 
-The two **analysers** stream Server-Sent Events (SSE) straight through to the browser so the
-user sees text as it is generated. The two **generators** make a blocking call and parse the
-model's reply as JSON (`extract_json` strips markdown fences before `json.loads`), retrying once
-with a correction nudge if the first response doesn't parse. The **chat proxy** is a
-general-purpose passthrough to the configured model — with the API key never reaching the
-browser — that a client can drive directly. It isn't wired to a UI today; it exists as the
-foundation for future conversational features.
+The three **streaming** features never stream to the browser. Each is **trigger → background
+task → DB → poll**: the trigger endpoint (e.g. `POST /api/activities/{id}/analyze`) returns
+`202` and spawns a background task, which consumes the upstream SSE and persists the text
+incrementally into a DB column via `stream_into_db`
+(`backend/app/services/llm_streaming.py`), while the frontend SWR-polls the matching `GET`.
+The user still sees the text appear progressively, but no SSE ever crosses the API boundary.
+The two **generators** make a blocking call and parse the model's reply as JSON
+(`extract_json` strips markdown fences before `json.loads`), retrying once with a correction
+nudge if the first response doesn't parse.
+
+!!! info "No chat passthrough — by design"
+    A general-purpose `POST /api/llm/chat` proxy existed until issue #45, forwarding a
+    client-supplied `messages` array to the caller's model. It was removed: a client that
+    supplies the message array **controls the system prompt**, which would make the
+    coach-scope and medical-boundary guardrails removable by anyone holding an access token.
+    Conversational features build their messages server-side like everything else.
 
 **Goal guidance** (`llm_goal_guidance`) shares the daily training-status shape: an on-demand
 background task streams the coach's prose, persists it incrementally on the goal row, and is
@@ -116,7 +125,7 @@ where the key came from (`user` / `instance` / `none`).
 
 ```mermaid
 flowchart TD
-    Req["Call site<br/>(chat / generator / analyser / test)"] --> BYOK{"Athlete has own base_url?"}
+    Req["Call site<br/>(generator / analyser / test)"] --> BYOK{"Athlete has own base_url?"}
     BYOK -->|"yes — source = user"| U["base_url / model / key / headers:<br/>athlete only (instance ignored)"]
     BYOK -->|"no — source = instance"| Sel{"Select instance preset by name<br/>(request → athlete.llm_model → first preset)"}
     Sel --> P["Preset's base_url / model / key / headers / body"]
@@ -127,7 +136,7 @@ flowchart TD
 Two thin wrappers adapt this for their callers:
 
 - **`resolve_llm_config(athlete, instance, user_id, *, requested_model, allow_instance_fallback)`**
-  — the athlete-aware path used by the chat proxy and the generators. It enforces the use-time
+  — the athlete-aware path used by the generators and the streaming analysers. It enforces the use-time
   policy and raises **`LlmConfigError`** with a machine-readable `code` (`no_base_url` → HTTP 400,
   `server_not_allowed` → 403, `instance_fallback_disabled` → 403) that the API layer maps to a
   status. The **allow-list is checked here at use time** (BYOK URLs only), so the generators get
@@ -156,7 +165,7 @@ It is controlled by the single boolean `instance_settings.llm_requires_subscript
 | on | no | no | denied → HTTP 403 `{"detail": {"code": "llm_subscription_required", …}}` |
 
 The 403 carries a **structured `detail.code`** so every frontend branches on a stable key, not
-message text. It gates the chat proxy, the plan/workout generators, activity analysis and the
+message text. It gates the plan/workout generators, goal guidance, activity analysis and the
 training-status trigger — **including the background auto hooks**, which are checked in the request
 context before spawning; denied users are skipped silently (their auto-analyze settings stay saved
 but inert). Admins are **not** implicitly exempt (they can grant themselves an entitlement); the
@@ -168,8 +177,8 @@ session on the **separate** [`llm_usage` database](data-model.md) and records on
 `feature`, resolved `provider` and `model`, and **input/output tokens counted separately**.
 Failures log a warning and never break the user's request. **Only instance-paid calls are
 recorded — when `source == "user"` (BYOK) the call is skipped entirely**, because the hoster pays
-nothing for it. `call_llm` returns `(text, usage)` for the non-streaming generators; the chat
-proxy and both streaming analysers inject `stream_options.include_usage` and capture the trailing
+nothing for it. `call_llm` returns `(text, usage)` for the non-streaming generators; the
+streaming features inject `stream_options.include_usage` and capture the trailing
 usage chunk (retrying once without the option for Ollama-family servers, and recording nulls when
 usage never arrives rather than estimating). `GET /api/admin/llm-usage/summary` aggregates the
 usage DB into day/week/month buckets (or by user/provider/feature), answering "tokens per user per
@@ -196,8 +205,9 @@ The browser never talks to the LLM directly — every call is **proxied server-t
   also strips/validates the scheme and runs the SSRF check) and at **use time** in
   `resolve_llm_config` — and it only ever restricts user (BYOK) URLs, never admin-configured
   instance presets.
-- **Bounded responses.** The proxy caps an upstream response at 32 MB to avoid unbounded memory
-  use.
+- **No client-supplied prompts.** Every request sent upstream is assembled server-side from a
+  service's own system prompt. No endpoint accepts a caller-provided `messages` array, so the
+  guardrails baked into those prompts cannot be swapped out by a token holder.
 
 ## Testing a connection
 
