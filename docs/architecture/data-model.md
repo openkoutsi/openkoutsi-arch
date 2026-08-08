@@ -12,6 +12,7 @@ flowchart TD
         U["users (roles + consent)"]
         I["invitations (instance-wide)"]
         PR["password_reset_tokens"]
+        PAT["personal_access_tokens"]
         PC["provider_connections (encrypted tokens)"]
         IS["instance_settings (single row)"]
         EN["llm_entitlements (per-user LLM access)"]
@@ -35,6 +36,7 @@ flowchart TD
     U -->|owns| PerUser
     U --> PC
     U --> EN
+    U --> PAT
     U -.records.-> LU
     PerUser --> Files
 ```
@@ -46,6 +48,13 @@ Shared, instance-wide tables:
 - **`users`** — credentials, **`roles`**, and consent fields.
 - **`invitations`** — instance-wide invite tokens.
 - **`password_reset_tokens`**.
+- **`personal_access_tokens`** — long-lived, scoped credentials a user issues to their own
+  tooling. Only `sha256(secret)` is stored (unique), alongside the user-written `name`, a
+  JSON-encoded `scopes` list, `expires_at`, a coarsely-written `last_used_at`, `revoked_at` and
+  `last_expiry_notice`. `user_id` is indexed and cascades on delete. **Expired and revoked rows
+  are retained rather than pruned** — the audit log stores token ids, and a retained hash keeps a
+  presented-but-revoked token distinguishable from an unknown one. See
+  [Auth](auth.md#personal-access-tokens).
 - **`provider_connections`** — a user's Strava/Wahoo OAuth connection. Access and refresh tokens
   are stored with an `EncryptedString` column type. A connection belongs to the **user globally**
   (one connect per provider, enforced by a `(user_id, provider)` unique constraint).
@@ -56,7 +65,9 @@ Shared, instance-wide tables:
   no instance single-config or global-headers column, and no env-var fallback (see the
   [LLM architecture](llm.md)). The single boolean **`llm_requires_subscription`** (default
   false) is the opt-in [LLM subscription gate](llm.md); until an admin flips it, LLM features
-  work as before.
+  work as before. **`allow_personal_access_tokens`** (default **true**, unlike the other gates —
+  it preserves no prior behaviour) is the self-hoster's kill switch, checked at *authentication*
+  so flipping it off stops tokens already issued.
 - **`llm_entitlements`** — a per-user "LLM access" entitlement (one row per user, `user_id`
   unique). A table rather than a role because it carries expiry, provenance and audit fields
   (`status`, `source`, `granted_by_user_id`, `starts_at`, `expires_at`, `external_ref`, `notes`)

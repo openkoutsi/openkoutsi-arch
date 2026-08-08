@@ -139,10 +139,50 @@ denied on a gated instance.
 
 ## Security
 
-A single global security scheme applies: HTTP **bearer** auth carrying a **JWT**. The
-unauthenticated operations are `/health`, `/version`, `/public/...`, and the credential
-endpoints under `/auth/...` — login, refresh, invite `register`, and the self-serve email
-flows: `POST /auth/signup`, `POST /auth/verify-email`, `POST /auth/request-password-reset`
-and `POST /auth/reset-password`. The signup/verify/reset endpoints are gated at runtime
+A single global security scheme applies: HTTP **bearer** auth. The unauthenticated operations
+are `/health`, `/version`, `/public/...`, and the credential endpoints under `/auth/...` —
+login, refresh, invite `register`, and the self-serve email flows: `POST /auth/signup`,
+`POST /auth/verify-email`, `POST /auth/request-password-reset` and
+`POST /auth/reset-password`. The signup/verify/reset endpoints are gated at runtime
 (`allow_self_signup` and a configured email provider) and rate-limited; the request-reset and
 signup endpoints always return a generic response to avoid account enumeration.
+
+### Two credentials, one scheme
+
+The bearer value is **either** a short-lived session **JWT** or a long-lived **personal access
+token** (`okp_{id}_{secret}`, opaque and DB-backed). There is still exactly one security scheme
+because both travel in the same `Authorization: Bearer …` header — which is also why PATs needed
+no new `allow_headers` entry and no CORS change. See
+[Auth, roles & onboarding](../architecture/auth.md#personal-access-tokens) for the model.
+
+Operations carry an `x-personal-access-token` extension recording what a token may do with them:
+
+```jsonc
+// GET /activities
+"x-personal-access-token": { "allowed": true, "scope": "activities:read" }
+
+// GET /messages
+"x-personal-access-token": { "allowed": false }
+```
+
+The same fact is repeated in each operation's `description`, so it survives into rendered
+reference docs. Scope enforcement is **default-deny** at the server: an authenticated operation
+carrying no declaration is unreachable by a token rather than open.
+
+### Personal access token endpoints
+
+`/tokens` — create, list, revoke, plus `GET /tokens/scopes` for the vocabulary and the allowed
+lifetimes. **Session-authenticated only** (the router itself is closed to tokens, so a token can
+never mint another), and there is deliberately **no update operation**: a token's name, scopes
+and expiry are immutable, so `PUT`/`PATCH` would have nothing to act on.
+
+`GET`/`DELETE /admin/users/{user_id}/tokens[/{token_id}]` give an administrator list-and-revoke
+over one user's tokens — metadata only, never the name, and with no issue-on-behalf counterpart.
+
+### Rate limiting
+
+Limits are keyed by **principal**: `user:{user_id}` for an authenticated request, and the client
+address for everything else. The fallback leaves the IP-keyed limits protecting the
+unauthenticated endpoints unchanged. The key is the user rather than the token because tokens
+can be minted freely — per-token buckets would make every limit multiplicative in a number
+nothing caps.
