@@ -86,14 +86,25 @@ router = APIRouter(prefix="/activities", tags=["activities"], dependencies=[
 @router.post("/analyze", dependencies=[pat_forbidden()])             # closed outright
 ```
 
-The declaration enforces nothing itself; it records itself on `request.state`, and
-`get_current_user` reads it back. Recording rather than enforcing is what makes this
-default-deny: **a route that declares nothing leaves nothing on `request.state` and is
-unreachable**, so a router added later is closed rather than open.
+The declaration enforces nothing itself and is not read at request time either. Every route's
+policy is resolved **once, at app construction**, into an endpoint → `PatAccess` map that
+`get_current_user` looks the current endpoint up in. Deriving the policy from the route rather
+than from what has run is what makes this default-deny: **a route that declares nothing is
+absent from the map and unreachable**, so a router added later is closed rather than open.
+
+The indirection is load-bearing rather than incidental. An earlier version had the declaration
+publish itself on `request.state` for the resolver to read back — correct only while every
+declaration happens to run before `get_current_user` does, and it silently does not when a
+route-level dependency resolves `get_current_user` as a sub-dependency of its own.
+`require_consent` on `/integrations/{provider}/connect` is exactly that shape: FastAPI caches
+the identity resolution, so the first dependency to ask fixes the answer and a `pat_forbidden()`
+later in the same list never speaks. Resolving statically from `route.dependant` removes the
+ordering question instead of documenting it, and a handler registered on two routes with
+conflicting declarations raises at startup.
 
 A convention only becomes a control when something fails without it, so
 `tests/integration/test_pat_scopes.py` walks `app.routes` and fails when an authenticated route
-carries no declaration.
+carries no declaration — and pins the ordering case above as a regression.
 
 ### What a token can never reach
 
@@ -108,6 +119,8 @@ happening to lack a scope:
 | `/api/messages` | The inbox is platform correspondence, and it is where this feature's own expiry warnings land. A credential should not be able to read the message saying it is about to be cut off. |
 | `/api/consent` | Consent is the account holder's act, not a credential's. |
 | `/api/llm/*` and the LLM triggers | They spend money. `check_llm_access` also denies a PAT outright, which covers the routes that trigger a call only *sometimes*. |
+| The LLM **configuration** (`llm_base_url`, `llm_api_key` in athlete `app_settings`) | Closing only the spending surfaces leaves this open, and repointing the base URL makes the user's *own session* ship health data to a host of the token holder's choosing — with every other control still green. `check_url_safe` blocks only link-local metadata ranges, so any public host passes. |
+| `GET /api/integrations/{provider}/connect` | A GET, but not a read: it mints a signed `state` that the **unauthenticated** callback trusts alone to decide whose row provider tokens are written to. That state outlives token revocation, password reset and the instance switch, so a read scope must not be able to produce one. |
 
 `GET /api/athlete/export` **is** reachable, under its own `athlete:export` scope and never
 folded into a general read — one call that returns the entire record deserves its own grant, and
@@ -141,7 +154,13 @@ it is built as a default-deny control with a test behind it rather than a per-ro
   inherits their single-process assumption — two app processes would double-notify, and
   `last_expiry_notice` is the mitigation. Tokens live in the **registry** DB and the inbox in
   each **per-user** DB, so the sweep reads registry rows then opens each affected user's session.
-  Inbox always; email best-effort and opt-out per user via athlete `app_settings`.
+  Inbox always; email best-effort and opt-out per user via athlete `app_settings`. The stage is
+  marked and committed **immediately after the inbox write and before the email**: `notify_user`
+  commits to the user's own DB, so anything thrown by the optional channel afterwards would roll
+  back the mark while leaving the message durable — re-notifying daily, which is exactly the nag
+  the column exists to prevent, arriving precisely when mail is broken. The query also excludes
+  the terminal `expired` stage in SQL (with an index on `expires_at`), so its cost is bounded by
+  live tokens rather than by the instance's whole history of retained dead ones.
 - **Revocation is immediate** — no cache, no grace window — and **dead rows are retained**. The
   audit log stores token ids, so deleting rows would turn historical entries into unresolvable
   identifiers at the exact moment somebody is reconstructing what a leaked credential did; and
@@ -169,9 +188,14 @@ comforting untruth.
 
 `core/limiter.py` was `Limiter(key_func=get_remote_address)`. A PAT makes a per-principal key
 both necessary — one script hammering from one address is not one anonymous visitor — and
-finally possible, because a token id is a stable principal in a way an IP never was. The key
-func now returns `pat:{token_id}` when the resolver set one and falls back to the address
-otherwise, so the limits protecting the unauthenticated endpoints are untouched.
+finally possible, because an authenticated request carries a stable identity in a way an IP
+never did. The key func returns `user:{user_id}` when the resolver set one and falls back to
+the address otherwise, so the limits protecting the unauthenticated endpoints are untouched.
+
+The principal is the **user**, not the token. Keying on the token id would read better in logs,
+but a user may mint tokens freely and each new one would be a fresh bucket — making every limit
+multiplicative in a number nothing caps, and inverting the intent above the moment a script
+holds two credentials. Per-token attribution lives in the audit log, where it costs nothing.
 
 Every PAT-authenticated request is written to the `openkoutsi.audit` logger with token id, user,
 route, method and outcome — **structured logs, not the shared usage DB**, because invocation

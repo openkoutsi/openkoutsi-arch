@@ -181,6 +181,8 @@ over one user's tokens — metadata only, never the name, and with no issue-on-b
 
 ### Rate limiting
 
-Limits are keyed by **principal**: `pat:{token_id}` for a token-authenticated request, and the
-client address for everything else. A token id is a stable principal in a way an IP never was,
-and the fallback leaves the IP-keyed limits protecting the unauthenticated endpoints unchanged.
+Limits are keyed by **principal**: `user:{user_id}` for an authenticated request, and the client
+address for everything else. The fallback leaves the IP-keyed limits protecting the
+unauthenticated endpoints unchanged. The key is the user rather than the token because tokens
+can be minted freely — per-token buckets would make every limit multiplicative in a number
+nothing caps.
