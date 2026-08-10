@@ -62,7 +62,8 @@ would double-notify, and the `last_expiry_notice` column is the mitigation.
     The [agentic coaching path](llm.md#the-agentic-path-issue-43) runs inside the existing
     `analyze_activity_bg` / `analyze_training_status_bg` tasks — one-shot work spawned per
     trigger, not a poller — so nothing new is registered here. Its concurrency guard
-    (`AGENT_MAX_CONCURRENT_RUNS`) is an in-process semaphore and is bounded **per process**,
+    (`AGENT_MAX_CONCURRENT_RUNS`) is an in-process counter — deliberately not a semaphore, since
+    the one thing it must never do is make a run *wait* — and is bounded **per process**,
     the same single-process assumption the pollers make: two app processes each allow their own
     quota. That is a deliberate simplification rather than an oversight — the guard exists to
     stop one box queueing runs against a local model that serialises requests, and a run that
