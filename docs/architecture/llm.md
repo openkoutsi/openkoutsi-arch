@@ -218,6 +218,25 @@ one-result-per-call pairing exact and telling the model to ask again rather than
 gap it cannot see), and a run accumulates at most **24 000 characters** of tool results before it
 is routed to the same forced final turn.
 
+!!! note "The tools do not share the run's database session"
+    `call_tool` opens its own session per call rather than being handed the
+    analyzer's. Sharing is cheaper — one connection to one SQLite file instead of
+    one per call — and it is wrong, because the per-call tool timeout cancels a
+    call wherever it happens to be. A cancellation landing mid-statement
+    invalidates the connection, so every later use of the run's session raises
+    `PendingRollbackError`; and the `rollback()` that repairs *that* expires
+    every ORM instance in the session, after which a plain attribute read raises
+    `MissingGreenlet` because reloading it would need IO. The run reads the
+    athlete on every later tool call and the blob fallback reads the analyzer's
+    objects throughout — so the repair broke the degradation path the timeout
+    exists to protect.
+
+    A session nobody else holds has neither problem, and has them for **no**
+    inputs rather than for the ones we thought to handle. The cost is a pooled
+    connection checkout plus one `load_athlete` per call — at most 24 per run,
+    against a local file whose engine is already cached, on a path that opens a
+    registry session per call for the consent check anyway.
+
 ### Degrading is the design, not the error path
 
 BYOK is what makes this harder here than in a product that owns its model. Tool-calling support
