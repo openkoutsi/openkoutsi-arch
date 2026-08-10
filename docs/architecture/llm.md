@@ -194,11 +194,11 @@ flowchart TD
     Cfg -->|yes| Slot{"agent slot free?"}
     Slot -->|no| Blob
     Slot -->|yes| Turn["Completion with tools"]
-    Turn -->|"400/422 naming 'tools'"| Blob
-    Turn -->|"tool calls"| Dispatch["call_tool per call<br/>(progress code committed)"]
-    Dispatch --> Cap{"round cap reached?"}
+    Turn -->|"any upstream failure<br/>before prose"| Blob
+    Turn -->|"tool calls"| Dispatch["≤4 calls dispatched<br/>(progress code committed)"]
+    Dispatch --> Cap{"round cap or<br/>result budget spent?"}
     Cap -->|no| Turn
-    Cap -->|yes| Forced["Final turn, no tools,<br/>format rule restated"]
+    Cap -->|yes| Forced["Final turn, no tools,<br/>stop instruction + format rule"]
     Turn -->|"prose, after ≥1 tool round"| Answer["Prose → stream_into_db"]
     Forced --> Answer
     Turn -->|"prose, turn zero"| Blob
@@ -208,6 +208,15 @@ flowchart TD
 Round caps differ by surface because the questions do: **6** for the status card, which is broad
 and wants several lookups, **3** for one activity, which is narrow and normally needs its own
 detail plus perhaps one comparison.
+
+Two more bounds sit alongside the round cap, because the round cap bounds the wrong quantity on
+its own. A round trip may carry any number of parallel calls, so counting trips leaves the worst
+case at *six times however many the model emits at once* — and it is the **sum** of the results,
+replayed into the context of every later turn, that spends the window and the money. So a single
+turn dispatches at most **4** calls (the rest get a result saying they were not run, keeping the
+one-result-per-call pairing exact and telling the model to ask again rather than reasoning from a
+gap it cannot see), and a run accumulates at most **24 000 characters** of tool results before it
+is routed to the same forced final turn.
 
 ### Degrading is the design, not the error path
 
@@ -221,17 +230,28 @@ mitigation. Every failure degrades at runtime, per call, to the blob prompt:
 | Provider rejects the `tools` param (400/422) | `is_tool_calling_unsupported_error` — the twin of `is_response_format_unsupported_error` |
 | Preset says the server cannot really do it | `ResolvedLlm.tools_supported`, from `"tools_supported": false` |
 | Provider accepts `tools` and calls none | turn zero produced prose, which would be an answer written from no data |
-| Model loops past the round cap | one forced final turn with **no** `tools` array at all |
+| Model loops past a budget | one forced final turn with **no** `tools` array at all |
 | This process is already at its concurrency limit | `AGENT_MAX_CONCURRENT_RUNS`, checked without blocking |
+| **Anything else upstream, before prose is written** | a 429, a 5xx, a dropped connection — and above all a context-length 400 |
 
 `AgenticUnavailable` is the single signal for all of them, and it carries a rule the code
 enforces rather than assumes: **it may only be raised before the first character of prose has
 been yielded.** After that the text is committed to the DB, and a fallback would staple a second
-answer onto a partial first one.
+answer onto a partial first one. That invariant is also what makes the last row safe to state so
+broadly: before any prose, falling back costs nothing and an error card costs the answer.
 
-Neither capability detector swallows an *"invalid schema"* body. That means openkoutsi's own
-pydantic model is broken, and treating it as a provider limitation would silently drop every
-athlete on every provider to the non-agentic path with the test suite still green.
+Context length deserves naming separately, because it is a failure **this loop creates**. A run
+accumulates tool results a single-shot prompt never would, and the small windows on self-hosted
+llama.cpp and Ollama builds are precisely the population the whole degradation design exists for
+— failing there, on a provider where the blob prompt would have fitted comfortably, would be the
+design missing its own target. The result budget above is the other half of that answer: the
+fallback stops it being fatal, the budget stops it happening as often.
+
+The one thing that does **not** degrade is an *"invalid function schema"* body
+(`is_our_tool_schema_error`). That means openkoutsi's own pydantic model is broken, and treating
+it as a provider limitation would silently drop every athlete on every provider to the
+non-agentic path with the test suite still green. It has to be an explicit check rather than a
+non-match, precisely because everything else now falls back around it.
 
 !!! note "Bulk imports are always non-agentic"
     A provider backlog import creates one `analyze_activity_bg` per imported activity. A few
