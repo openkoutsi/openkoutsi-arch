@@ -21,9 +21,11 @@ flowchart TD
   delegate to services. Mounted under `/api` by `backend/main.py`.
 - **Services** (`backend/app/services/*`) — application logic: the provider-sync pipeline,
   `metrics_engine` (fitness/fatigue/form), the [LLM features](llm.md) (`llm_activity_analyzer`,
-  `llm_plan_generator`, `llm_workout_generator`, `llm_training_status_analyzer`, and the shared
-  `llm_client`), the `activity_workout_matcher`, `plan_adherence` (deterministic plan-adherence
-  scoring), `pr_detection`, and `notifications`.
+  `llm_plan_generator`, `llm_workout_generator`, `llm_training_status_analyzer`, the shared
+  `llm_client`, and `llm_agent` — the
+  [agent loop](llm.md#the-agentic-path-issue-43) the two coaching surfaces can optionally run
+  over the tool layer), the `activity_workout_matcher`, `plan_adherence` (deterministic
+  plan-adherence scoring), `pr_detection`, and `notifications`.
 - **Core library** (`openkoutsi/`) — framework-agnostic domain code with no FastAPI or DB
   imports: `fit`/`fit_processing` (FIT decoding), `training_math` (training load, weighted power,
   power/distance bests), `categorization` (Coggan zone classification), `plan_builder`,
@@ -55,6 +57,18 @@ The **token-expiry sweep** loops daily and warns users whose
 is `lifespan` asyncio tasks rather than a scheduler dependency, which is why that feature needed
 no new one — and why it inherits the pollers' **single-process assumption**: two app processes
 would double-notify, and the `last_expiry_notice` column is the mitigation.
+
+!!! note "The agent loop adds no lifespan task, and inherits the same assumption"
+    The [agentic coaching path](llm.md#the-agentic-path-issue-43) runs inside the existing
+    `analyze_activity_bg` / `analyze_training_status_bg` tasks — one-shot work spawned per
+    trigger, not a poller — so nothing new is registered here. Its concurrency guard
+    (`AGENT_MAX_CONCURRENT_RUNS`) is an in-process counter — deliberately not a semaphore, since
+    the one thing it must never do is make a run *wait* — and is bounded **per process**,
+    the same single-process assumption the pollers make: two app processes each allow their own
+    quota. That is a deliberate simplification rather than an oversight — the guard exists to
+    stop one box queueing runs against a local model that serialises requests, and a run that
+    cannot get a slot degrades to the single-shot prompt rather than waiting, so overshooting
+    it costs latency rather than correctness.
 
 ## The provider sync pipeline
 

@@ -17,11 +17,18 @@ prompt server-side; there is no general-purpose passthrough:
 
 | Feature | Service | Shape |
 |---|---|---|
-| **Activity analysis** | `llm_activity_analyzer` | Streaming prose |
-| **Daily training status** | `llm_training_status_analyzer` | Streaming prose |
+| **Activity analysis** | `llm_activity_analyzer` | Streaming prose — optionally [agentic](#the-agentic-path-issue-43) |
+| **Daily training status** | `llm_training_status_analyzer` | Streaming prose — optionally [agentic](#the-agentic-path-issue-43) |
 | **Goal guidance** | `llm_goal_guidance` | Streaming prose |
 | **AI plan generation** | `llm_plan_generator` | One-shot JSON |
 | **AI workout generation** | `llm_workout_generator` | One-shot JSON |
+
+The two coaching surfaces can additionally run as an **agent loop over the MCP tools** rather
+than from a hand-built prompt; that is an opt-in variation on the same trigger → task → DB →
+poll machinery, described in [The agentic path](#the-agentic-path-issue-43) below. The two
+generators deliberately stay one-shot: they emit JSON against a strict schema and are graded
+objectively by their own parsers, so a loop would buy them nothing and fight the
+structured-output path.
 
 The three **streaming** features never stream to the browser. Each is **trigger → background
 task → DB → poll**: the trigger endpoint (e.g. `POST /api/activities/{id}/analyze`) returns
@@ -148,6 +155,140 @@ Two thin wrappers adapt this for their callers:
 `GET /api/llm/models` returns the presets a user may select (`{name, label}`) plus their current
 effective selection (the first preset when nothing is saved), so the UI picker mirrors exactly
 what `resolve_llm()` would choose.
+
+## The agentic path (issue #43)
+
+Two of the five features — activity analysis and daily training status — can run a second way.
+Instead of a prompt builder assembling a fixed context blob ahead of time, the model is handed
+the **read-only coaching tools** (issue #42) and decides what it needs. That buys one thing the
+blob cannot give: the ability to *follow a thread*. A fixed prompt that includes a flat form
+number can only restate it; an agent can go and look at the rides behind it and say why.
+
+It is **opt-in per athlete** (`app_settings.agentic_koutsi`, default off), and both paths are
+expected to coexist indefinitely. `_build_status_prompt()` and `_build_prompt()` are not legacy.
+
+!!! warning "This is not a chat feature, and not an SSE one"
+    Neither surface is a conversation: both are one-shot generations fired from a background
+    task with nobody typing, so there is **no conversation storage and no conversation id** — the
+    message history lives inside one `analyze_*_bg` task and dies with it.
+
+    Nor does the loop stream to the browser. It is layered **onto** `stream_into_db`, not beside
+    it: the trigger → background task → DB → poll shape exists so a local model taking minutes
+    never dies on a request timeout and a page reload never loses a generation, and an agentic
+    run needs both properties more than a single-shot one does, not less.
+
+### The loop
+
+`backend/app/services/llm_agent.py` is provider-neutral; everything specific to the OpenAI
+chat-completions dialect sits behind two functions (`tool_definitions`, and the pair that build
+the `assistant` / `tool` replay messages). Tool schemas are the registry's own pydantic argument
+models, so what the provider constrains the model to and what
+`backend.app.mcp.dispatch.call_tool` validates against are the same object and cannot drift.
+
+```mermaid
+flowchart TD
+    Start["analyze_*_bg"] --> Opt{"agentic_koutsi<br/>and not a bulk import?"}
+    Opt -->|no| Blob["Blob prompt<br/>(single-shot)"]
+    Opt -->|yes| Cfg{"preset tools_supported?"}
+    Cfg -->|no| Blob
+    Cfg -->|yes| Slot{"agent slot free?"}
+    Slot -->|no| Blob
+    Slot -->|yes| Turn["Completion with tools"]
+    Turn -->|"400/422 naming 'tools'"| Blob
+    Turn -->|"tool calls"| Dispatch["call_tool per call<br/>(progress code committed)"]
+    Dispatch --> Cap{"round cap reached?"}
+    Cap -->|no| Turn
+    Cap -->|yes| Forced["Final turn, no tools,<br/>format rule restated"]
+    Turn -->|"prose, after ≥1 tool round"| Answer["Prose → stream_into_db"]
+    Forced --> Answer
+    Turn -->|"prose, turn zero"| Blob
+    Forced -->|"nothing"| Blob
+```
+
+Round caps differ by surface because the questions do: **6** for the status card, which is broad
+and wants several lookups, **3** for one activity, which is narrow and normally needs its own
+detail plus perhaps one comparison.
+
+### Degrading is the design, not the error path
+
+BYOK is what makes this harder here than in a product that owns its model. Tool-calling support
+across the population of servers a user may point at ranges from good, to absent, to
+*present but wrong*, and the hoster controls none of it — so "smoke-test each provider" is not a
+mitigation. Every failure degrades at runtime, per call, to the blob prompt:
+
+| Condition | Detected by |
+|---|---|
+| Provider rejects the `tools` param (400/422) | `is_tool_calling_unsupported_error` — the twin of `is_response_format_unsupported_error` |
+| Preset says the server cannot really do it | `ResolvedLlm.tools_supported`, from `"tools_supported": false` |
+| Provider accepts `tools` and calls none | turn zero produced prose, which would be an answer written from no data |
+| Model loops past the round cap | one forced final turn with **no** `tools` array at all |
+| This process is already at its concurrency limit | `AGENT_MAX_CONCURRENT_RUNS`, checked without blocking |
+
+`AgenticUnavailable` is the single signal for all of them, and it carries a rule the code
+enforces rather than assumes: **it may only be raised before the first character of prose has
+been yielded.** After that the text is committed to the DB, and a fallback would staple a second
+answer onto a partial first one.
+
+Neither capability detector swallows an *"invalid schema"* body. That means openkoutsi's own
+pydantic model is broken, and treating it as a provider limitation would silently drop every
+athlete on every provider to the non-agentic path with the test suite still green.
+
+!!! note "Bulk imports are always non-agentic"
+    A provider backlog import creates one `analyze_activity_bg` per imported activity. A few
+    hundred activities at four-to-six calls each is a real bill, and a lot of concurrent loops
+    against one local model that serialises requests — on the one path where nobody reads the
+    output one analysis at a time. `provider_sync` passes `allow_agentic=False`; the live
+    webhook ingests do not, because there the athlete just finished that ride.
+
+### Progress: a column of codes
+
+The loop's first rounds emit no assistant prose at all. Against a poll-and-render frontend that
+means a spinner for the whole gathering phase and then a finished answer appearing at once —
+worse than what it replaced. So progress is persisted alongside the text, on the same commit
+cadence, in **its own nullable column** (`athletes.training_status_progress`,
+`activities.analysis_progress`).
+
+Three decisions, each with a reason that outlives the feature:
+
+- **A separate column, not an envelope inside the prose.** The frontend's
+  `parseMoodAndParagraphs` reads the prose column as raw text, and three surfaces share that
+  parser. A structured envelope would have broken all three.
+- **Codes, not model-authored sentences.** `thinking`, or `tool.<registry tool name>`. The
+  coaching prompts run in fourteen languages while every tool name and description is English,
+  so model prose here would be untranslated the moment the athlete is not reading English — and
+  could put tool internals in front of them. The client translates, and falls back to generic
+  copy for a `tool.*` suffix it does not know, which is what lets #42 add a tool without a
+  lockstep frontend release.
+- **Cleared when the prose starts**, so a finished card looks exactly as it did before any of
+  this existed. Both endpoints additionally gate the field on `status == "pending"`, so a run
+  killed between its last progress commit and settling cannot surface a stale line.
+
+A code stays on its tool through the turn that *reads* the result, rather than reverting to
+`thinking`: the tool call against one user's SQLite file takes milliseconds and the model turn
+takes seconds, so reverting would show the generic line for all of the slow part.
+
+### Two contracts the loop must not break
+
+**The `MOOD:` line.** The first line of the prose is parsed to pick Koutsi's avatar, and
+`llm-eval` asserts on it. Models are measurably worse at obeying a leading-format instruction on
+a turn that follows tool results than on a clean single-shot prompt, so the rule is **restated as
+a system message on the answering turn** rather than trusted to carry from turn one. A missing
+line still degrades to the default avatar; nothing prepends one.
+
+**The instance house style.** `llm_analysis_context` is a system message, and the loop rebuilds
+the message list from scratch on every turn rather than mutating one in place — so the hoster's
+rules are present on turn five as much as on turn one. Three tool results are not allowed to push
+them out of the model's attention.
+
+### Usage is summed, not sampled
+
+A single-shot analysis is one call and one `usage` object. An agent run is three to five, each
+reported independently by the provider. Recording only the last would make
+`GET /api/admin/llm-usage/summary` under-report every agentic analysis by however many turns it
+took — so `merge_usage` (`llm_access.py`) folds each turn into a running total, including the
+turns a *fallback* spent before giving up, which the hoster also paid for. Each side is
+normalised before the addition, so a run mixing a turn that reported only a total with one that
+reported only parts still adds up.
 
 ## Subscription gating & usage tracking (issue #9)
 
