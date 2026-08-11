@@ -387,7 +387,17 @@ design. They are almost all of the bytes; they go stale (a Tuesday result descri
 the tools are read-only so re-running is *more* correct than replaying); and they are working,
 not dialogue. This is also what flattens the context-growth problem the issue predicted — most
 of it would have been created by storing the one thing that does not need storing. Only
-`tool_names` survives, for the "Koutsi looked at…" footer.
+`tool_names` survives, so the thread can draw each lookup as a step.
+
+Those names are written through on **every progress marker**, not once when the turn settles.
+The web app renders the steps where they happened — ahead of the answer they fed, which is
+where the loop actually made them, since prose that turns out to precede a tool call is
+discarded as a preamble and an answer therefore never interleaves with its own lookups. A turn
+still gathering is exactly when that record is worth showing: written only at the end, the
+timeline would stay empty through the whole slow part and then land three steps at once
+alongside the answer, as though none of them had taken any time. It costs nothing extra —
+markers already commit as they arrive (`stream_into_db`), because being visible to the next
+poll is what they are for.
 
 The loop's own scaffolding never reaches the transcript either. `_final_reminder` and
 `_format_reminder` are sent as `role: "user"` messages — deliberately, since several chat
