@@ -12,7 +12,7 @@ action, nothing is ever sent to a model and every other feature keeps working.
 
 ## The features
 
-Five services under `backend/app/services/` use the LLM. Every one of them builds its own
+Six services under `backend/app/services/` use the LLM. Every one of them builds its own
 prompt server-side; there is no general-purpose passthrough:
 
 | Feature | Service | Shape |
@@ -22,6 +22,7 @@ prompt server-side; there is no general-purpose passthrough:
 | **Goal guidance** | `llm_goal_guidance` | Streaming prose |
 | **AI plan generation** | `llm_plan_generator` | One-shot JSON |
 | **AI workout generation** | `llm_workout_generator` | One-shot JSON |
+| **Conversational Koutsi** | `llm_chat` | Streaming prose — [always agentic](#conversational-koutsi-issue-44) |
 
 The two coaching surfaces can additionally run as an **agent loop over the MCP tools** rather
 than from a hand-built prompt; that is an opt-in variation on the same trigger → task → DB →
@@ -45,7 +46,9 @@ nudge if the first response doesn't parse.
     client-supplied `messages` array to the caller's model. It was removed: a client that
     supplies the message array **controls the system prompt**, which would make the
     coach-scope and medical-boundary guardrails removable by anyone holding an access token.
-    Conversational features build their messages server-side like everything else.
+    Conversational features build their messages server-side like everything else — see
+    [Conversational Koutsi](#conversational-koutsi-issue-44), which is what that endpoint had
+    been kept as "the foundation for" and which deliberately did not use it.
 
 **Goal guidance** (`llm_goal_guidance`) shares the daily training-status shape: an on-demand
 background task streams the coach's prose, persists it incrementally on the goal row, and is
@@ -328,6 +331,154 @@ took — so `merge_usage` (`llm_access.py`) folds each turn into a running total
 turns a *fallback* spent before giving up, which the hoster also paid for. Each side is
 normalised before the addition, so a run mixing a turn that reported only a total with one that
 reported only parts still adds up.
+
+## Conversational Koutsi (issue #44)
+
+Every surface above is a **generation**: the backend picks the question, builds the prompt, and
+prints one answer. Chat is the first where the *athlete* picks the question, and nearly
+everything below follows from that one change.
+
+It is not a new pipeline. A chat turn is an agent run — same loop, same tool dispatch, same
+`stream_into_db`, same trigger → task → DB → poll — with the message history coming from the
+database instead of being empty, and a human waiting on the result.
+
+### Server-built messages, and why that is the whole feature
+
+`services/llm_chat.py` assembles every message. The client sends **one string**. This is the
+same property every other feature has by construction — there is no way to ask
+`_build_status_prompt()` for a shell script — and it is the only reason the scope policy below
+is worth writing: a caller who supplies the message array controls the system prompt, so every
+guardrail in it would be removable by anyone holding an access token, which is every user.
+Issue #45 removed the proxy that worked that way before this was built on it.
+
+### The scope policy
+
+An open text box removes the bound the other surfaces have for free.
+`llm_chat._SCOPE_POLICY` replaces it with four bands: **coaching** answered fully, **adjacent**
+(fuelling, sleep, strength, bike fit) answered as a coach, **medical** redirected to a clinician
+without diagnosing or advising training through symptoms, and **unrelated** declined in a
+sentence.
+
+The medical band is why this exists — the platform holds heart rate, weight and RPE, and a model
+just shown a weight log will answer a rapid-weight-loss question with total confidence. But the
+band that gets missed is the *other* direction: a guard tight enough to refuse "what should I eat
+on a four-hour ride?" is a broken coach, not a safe default. Both directions are asserted, and
+`llm-eval`'s `chat` family grades them **asymmetrically on purpose** — collapsing them into one
+"is it safe?" score would reward a model that refuses everything.
+
+Layers under the prompt, because a system prompt is a first line and not a boundary:
+
+- **Restated every turn.** `_drive` rebuilds the system messages per turn rather than mutating a
+  list, so band policy on turn twenty is the same text as on turn one — the same mechanism that
+  keeps the instance house style present, for the same reason.
+- **History is trimmed**, so the system message never drifts arbitrarily far from the generation
+  point.
+- **BYOK is a ceiling.** A user pointing openkoutsi at their own model can make it say anything.
+  Guardrails are enforced where openkoutsi owns the request; the docs say the rest is theirs.
+
+### Storage: dialogue only
+
+`chat_conversations` / `chat_messages` in the per-user DB, following the inbox precedent — the
+database file identifies the owner, so there is no owner column and cross-user access 404s
+without a predicate anyone could forget.
+
+**Tool calls and results are deliberately not stored**, though replaying them was the obvious
+design. They are almost all of the bytes; they go stale (a Tuesday result describes Tuesday, and
+the tools are read-only so re-running is *more* correct than replaying); and they are working,
+not dialogue. This is also what flattens the context-growth problem the issue predicted — most
+of it would have been created by storing the one thing that does not need storing. Only
+`tool_names` survives, for the "Koutsi looked at…" footer.
+
+The loop's own scaffolding never reaches the transcript either. `_final_reminder` and
+`_format_reminder` are sent as `role: "user"` messages — deliberately, since several chat
+templates drop mid-conversation system messages — which is harmless in a run that dies with its
+task but would otherwise be replayed forever as things the athlete said, and land in their GDPR
+export as their words. The loop copies the caller's history before appending to it, and a test
+pins that.
+
+### What is different because there is no fallback
+
+`coaching_stream` exists to swallow `AgenticUnavailable` and quietly serve the blob prompt.
+Chat has no blob prompt — the question is arbitrary and the data it needs is unknown — so the
+exception *is* the answer. `AgenticUnavailable` therefore carries a `code`, and each cause gets
+its own outcome rather than one generic apology:
+
+| Cause | Chat | The two card surfaces |
+|---|---|---|
+| No free agent slot | **Queues** for `CHAT_QUEUE_WAIT_SECONDS`, visibly, then `busy` | Refused instantly → blob |
+| `tools_supported=false` / provider rejects `tools` | Surface disabled up front | Silently → blob |
+| Accepts `tools`, calls none | **Not a failure** — the turn answered | → blob (an answer built from no data) |
+| 429 / 5xx / context length | Turn settles `error` with a code | → blob |
+
+The slot policy is the sharpest inversion. `_run_slot` refuses immediately *by design*, because
+waiting would push a background run towards the pending timeout while a better answer — the blob
+prompt — was available now. For chat that reasoning runs backwards: refusing buys nothing and
+loses the athlete's question, and the four slots are shared with the background training-status
+runs that fire on dashboard load. So `_waited_run_slot` bounds a wait instead, and the wait is a
+**state** (`queued`) rather than a gap. Both policies are built on one non-blocking
+`_try_claim_slot`, so neither can reintroduce the check-then-acquire gap the counter exists to
+close.
+
+Three behaviours are opt-in on `AgentRequest` (`conversational`, `history`, `slot_wait_s`) rather
+than changes to the shared path. The third is that **turn-zero prose may be the answer**: the
+card suppresses it correctly, since an answer written before looking at anything is guesswork
+about this athlete's training — but "what does TSB mean?" has no lookup behind it, and refusing
+it until a tool had been called would be a worse conversation, not a safer one. The preamble
+guard still applies, so "let me look at your last four weeks…" never becomes the answer.
+
+### A run that no longer owns its row
+
+`settle_stuck_turns` runs in the *reader's* session and cannot cancel anything,
+so on its own it is only an opinion: a merely-slow run would carry on and
+overwrite the failure with an answer the athlete had already been told was not
+coming, and a retry accepted in between would put two runs on one thread.
+
+So the run checks. At every progress marker it re-reads its row's `status` — a
+**column** select, since its own session holds the entity with
+`expire_on_commit=False` and would otherwise answer from cache — and stands down
+when it finds it no longer owns the turn. That covers two situations with one
+mechanism: the stuck-turn settler having overruled it, and the athlete having
+deleted the conversation, where continuing would keep an agent slot and keep
+paying a provider for an answer with nowhere to land. Deleting is therefore
+allowed while a turn is live; it is a privacy action, and making someone wait out
+an answer they no longer want is the wrong trade.
+
+`chat_stuck_minutes` is 10 rather than the card's 30, but not lower: the clock is
+touched by progress markers and text flushes, and a tool round emits one marker
+and then no text at all while the model composes the call and reasons over the
+result — so the gap between two commits is a whole completion on a slow local
+model.
+
+### Retrying is a rerun, not a re-ask
+
+`POST …/messages/{id}/retry` re-queues the existing assistant row. The obvious
+client-side retry — re-post the same text — is wrong three ways at once, and they
+compound on exactly the setup most likely to need it: the athlete's question
+appears twice right after something has visibly gone wrong, a second turn of the
+budget is spent, and the replayed history ends with the same question adjacent to
+itself, which strict chat templates reject or merge. The per-conversation cap
+deliberately does not apply to a retry, or a thread at its limit could never be
+repaired.
+
+### Budgets
+
+Chat is the first LLM surface the **user** can trigger arbitrarily often, and each turn is
+several completions. Everything else is bounded by "one ride, one analysis" or "once a day", so
+chat carries its own: per-day and per-conversation turn caps, a message-length cap, and the
+history budget. Issue #9's gate applies per turn and `record_llm_usage` sums the turn's calls
+exactly as an agentic card run does.
+
+Failures that never reached a provider — `busy`, `tools_unsupported`, `unreachable` — do **not**
+spend a turn. Charging for them charges the athlete for openkoutsi's own unavailability, and it
+compounds: the web app offers a retry on exactly those codes, so a local model that is simply not
+running could otherwise eat a day's allowance without a single request leaving the box.
+`upstream` and `no_answer` still count, because they spent tokens somebody paid for.
+
+The rate limiter's key was also wrong here, and fixing it was not optional: `principal_key` only
+ever saw a principal on the personal-access-token path, so every signed-in request fell back to
+the remote address — one household behind one NAT sharing a bucket, one user with two browsers
+getting two. Chat is authenticated, athlete-triggered and expensive, so both auth paths now set
+`request.state.principal_user_id`.
 
 ## Subscription gating & usage tracking (issue #9)
 

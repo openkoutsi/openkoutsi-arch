@@ -154,6 +154,36 @@ Everything a single athlete owns — **one athlete per database**:
   from the history (back-filling an old ride moves it *earlier*, never to today), while
   `created_at` is wall-clock and only drives the "new" marker and the inbox notification.
 - The user's **message inbox**.
+- **Koutsi conversations** (issue #44) in `chat_conversations` / `chat_messages`. Like the inbox,
+  the database file identifies the owner, so there is no owner column and no `WHERE user_id = …`
+  anyone could forget — a conversation id minted in another user's DB simply is not in this one.
+
+    The assistant row is created **before** its answer exists, in `queued`, and streamed into in
+    place. It is the same stream-into-a-column shape the daily card uses, moved off a singleton
+    column on `athletes` and onto a row per turn, which is what lets a reload mid-answer resume
+    rather than lose the turn. `updated_at` is touched on every progress commit, so the
+    stuck-turn check means "no progress for N minutes" rather than "started N minutes ago" — the
+    distinction issue #91 had to introduce for the daily card, and for the same reason: an agent
+    run against a slow local model is many completions and must not be declared dead while it is
+    healthy.
+
+    **Only the dialogue is stored.** Tool calls and their results are deliberately absent, though
+    replaying them was the obvious design: they are almost all of the bytes, they go stale (the
+    tools are read-only, so re-running one on a later turn is *more* correct than replaying its
+    old answer), and they are working rather than dialogue. Only `tool_names` is kept, for the
+    "Koutsi looked at…" footer. See [LLM & AI features](llm.md#conversational-koutsi-issue-44).
+
+    History replayed to the model is built from **whole turns**, not from filtered rows: a
+    question is sent only with the answer it actually received. Filtering rows independently is
+    the obvious implementation and produces a non-alternating conversation the moment a turn
+    fails — two adjacent questions, or the same one twice after a retry — which several Jinja
+    chat templates reject or silently merge, and those are the BYOK local-model setups this is
+    built for.
+
+    `chat_messages` declares `ON DELETE CASCADE` to its conversation, but `PRAGMA foreign_keys`
+    is **off** on these connections, so that is documentation rather than behaviour: the delete
+    endpoint removes the messages explicitly. Relying on the cascade would orphan every row of a
+    thread the athlete believed they had deleted.
 
 The schema is created idempotently, so an existing message-only DB simply gains the training
 tables on first initialization.
