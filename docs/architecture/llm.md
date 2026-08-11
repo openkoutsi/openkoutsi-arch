@@ -426,6 +426,40 @@ about this athlete's training — but "what does TSB mean?" has no lookup behind
 it until a tool had been called would be a worse conversation, not a safer one. The preamble
 guard still applies, so "let me look at your last four weeks…" never becomes the answer.
 
+### A run that no longer owns its row
+
+`settle_stuck_turns` runs in the *reader's* session and cannot cancel anything,
+so on its own it is only an opinion: a merely-slow run would carry on and
+overwrite the failure with an answer the athlete had already been told was not
+coming, and a retry accepted in between would put two runs on one thread.
+
+So the run checks. At every progress marker it re-reads its row's `status` — a
+**column** select, since its own session holds the entity with
+`expire_on_commit=False` and would otherwise answer from cache — and stands down
+when it finds it no longer owns the turn. That covers two situations with one
+mechanism: the stuck-turn settler having overruled it, and the athlete having
+deleted the conversation, where continuing would keep an agent slot and keep
+paying a provider for an answer with nowhere to land. Deleting is therefore
+allowed while a turn is live; it is a privacy action, and making someone wait out
+an answer they no longer want is the wrong trade.
+
+`chat_stuck_minutes` is 10 rather than the card's 30, but not lower: the clock is
+touched by progress markers and text flushes, and a tool round emits one marker
+and then no text at all while the model composes the call and reasons over the
+result — so the gap between two commits is a whole completion on a slow local
+model.
+
+### Retrying is a rerun, not a re-ask
+
+`POST …/messages/{id}/retry` re-queues the existing assistant row. The obvious
+client-side retry — re-post the same text — is wrong three ways at once, and they
+compound on exactly the setup most likely to need it: the athlete's question
+appears twice right after something has visibly gone wrong, a second turn of the
+budget is spent, and the replayed history ends with the same question adjacent to
+itself, which strict chat templates reject or merge. The per-conversation cap
+deliberately does not apply to a retry, or a thread at its limit could never be
+repaired.
+
 ### Budgets
 
 Chat is the first LLM surface the **user** can trigger arbitrarily often, and each turn is
@@ -433,6 +467,12 @@ several completions. Everything else is bounded by "one ride, one analysis" or "
 chat carries its own: per-day and per-conversation turn caps, a message-length cap, and the
 history budget. Issue #9's gate applies per turn and `record_llm_usage` sums the turn's calls
 exactly as an agentic card run does.
+
+Failures that never reached a provider — `busy`, `tools_unsupported`, `unreachable` — do **not**
+spend a turn. Charging for them charges the athlete for openkoutsi's own unavailability, and it
+compounds: the web app offers a retry on exactly those codes, so a local model that is simply not
+running could otherwise eat a day's allowance without a single request leaving the box.
+`upstream` and `no_answer` still count, because they spent tokens somebody paid for.
 
 The rate limiter's key was also wrong here, and fixing it was not optional: `principal_key` only
 ever saw a principal on the personal-access-token path, so every signed-in request fell back to

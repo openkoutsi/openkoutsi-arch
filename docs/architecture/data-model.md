@@ -173,6 +173,13 @@ Everything a single athlete owns — **one athlete per database**:
     old answer), and they are working rather than dialogue. Only `tool_names` is kept, for the
     "Koutsi looked at…" footer. See [LLM & AI features](llm.md#conversational-koutsi-issue-44).
 
+    History replayed to the model is built from **whole turns**, not from filtered rows: a
+    question is sent only with the answer it actually received. Filtering rows independently is
+    the obvious implementation and produces a non-alternating conversation the moment a turn
+    fails — two adjacent questions, or the same one twice after a retry — which several Jinja
+    chat templates reject or silently merge, and those are the BYOK local-model setups this is
+    built for.
+
     `chat_messages` declares `ON DELETE CASCADE` to its conversation, but `PRAGMA foreign_keys`
     is **off** on these connections, so that is documentation rather than behaviour: the delete
     endpoint removes the messages explicitly. Relying on the cascade would orphan every row of a
