@@ -88,7 +88,7 @@ To decide which source's data populates the `Activity`'s metrics, sources are ra
 
 | Priority | Source |
 |---|---|
-| 1 | `upload` — manual FIT upload |
+| 1 | `upload` — manual upload or bulk import (FIT, GPX or TCX) |
 | 2 | `wahoo` — cloud sync **with** a FIT file |
 | 3 | `strava` — Strava API (stream-based) |
 | 4 | `wahoo` — cloud sync **without** a FIT file |
@@ -195,6 +195,81 @@ Once a source is attached, the pipeline fills in the activity:
 
 OAuth tokens are refreshed transparently before expiry (`ensure_fresh_token`), with
 provider-specific lookahead windows — see the per-provider pages.
+
+## Bulk import (issue #36)
+
+Getting a training history in used to be the hardest part of adopting openkoutsi:
+`POST /activities/upload` took one file, accepted only FIT, and allowed 30 an hour — while the
+thing on a prospective user's disk is a Strava bulk export, a zip of `.fit.gz`, `.tcx.gz` and
+`.gpx.gz`.
+
+There are now **two paths**, and the split is about the shape of the interaction rather than
+about size. The single upload is synchronous, returns the created activity, and is the only
+path that attaches a device file to an already-synced activity. Bulk import is a **job**,
+because an export is thousands of files and tens of minutes of parsing:
+
+```
+POST /api/activities/import        many files or an archive → 202 + job id
+GET  /api/activities/imports/{id}  progress + per-file outcome
+GET  /api/activities/imports       recent imports
+```
+
+### Where GPX and TCX join the pipeline
+
+They join at the parser, not at the pipeline. `openkoutsi/gpx.py` and `openkoutsi/tcx.py`
+produce the same `openkoutsi.workout.Profile` that `fit.summarizeWorkout` returns, on the same
+1 Hz shared clock, so Load, weighted power, zone snapshots, power bests, torque and interval
+extraction are unchanged — they consume a `Profile`, and always did.
+
+`openkoutsi/activity_formats.py` is the registry that makes the dispatch a lookup: each format
+module offers `summarizeWorkout`, `getStartTime` and `extractIntervals`, and every caller that
+used to import those from `openkoutsi.fit` now takes a format and asks for the module.
+
+Two differences between the formats are real and are handled rather than hidden:
+
+- **Often no power.** GPX in the wild is frequently HR-only or GPS-only. `calculate_load`
+  already falls back to heart rate, so such an activity gets a Load — it simply has no weighted
+  power, no power bests and no power-zone time. The API reports `original_format` so a client
+  can say why instead of presenting an empty chart as an error.
+- **GPS is discarded at parse time.** The parsers use coordinates only to derive distance and
+  elevation gain (`openkoutsi/geo.py`), and `Profile` has no field that could carry one — so
+  coordinates cannot reach `ActivityStream` even by mistake. `gpx.extract_route()` is the
+  deliberate, separately-named exception, returning geometry for in-memory route analysis; the
+  ingestion path does not call it, and `tests/integration/test_activity_import.py` asserts that
+  an imported GPX leaves no coordinate anywhere in the database, whitelisting the permitted
+  stream channels rather than blocklisting forbidden ones.
+
+### The runner
+
+`services/activity_archive.py` expands whatever was uploaded — plain file, gzip, or zip, walked
+recursively — treating it as hostile: nothing is extracted under a name the archive chose, entry
+names are validated and traversal rejected, sizes are enforced against a running total **while
+reading** rather than trusted from the zip header, and nesting depth is bounded. The 50 MB
+single-upload cap is a *compressed* size and bounds none of this.
+
+`services/activity_import.py` then works through the result. Three things make it more than the
+upload path in a loop:
+
+1. **One file's failure is not the job's.** Every file gets a result row — imported, skipped as
+   a duplicate, or failed with a reason — and the loop continues.
+2. **In-batch deduplication.** An export can hold one ride as FIT *and* TCX *and* GPX, so the
+   batch is collapsed before anything is written, keeping the richest format (`FIT > TCX >
+   GPX`). Skips are a normal outcome that gets counted, not a 409 that ends the job — so
+   re-importing an archive after a partial failure works.
+3. **The expensive work happens once.** `recalculate_from` over three years of history, run nine
+   hundred times, is quadratic and pointless; metrics, plan adherence and achievements are
+   recomputed a single time at the end. That also means one inbox message about the badges an
+   import unlocked rather than a wall of them, since a recompute announces its whole batch
+   together. The per-activity LLM hooks (auto-analyze, auto training status) are deliberately
+   **not** fired: importing 900 rides must not make 900 LLM calls.
+
+Parsing runs in a worker thread (`asyncio.to_thread`) so decoding an archive does not block the
+event loop; everything after it is database work on the job's own session.
+
+A second job while one is pending or running is refused with 409 rather than queued: two imports
+writing to one SQLite database interleave badly, and the athlete has no reason to want it. The
+rate limit is on **jobs** (5/hour), because a job is the unit of work an athlete asks for and one
+may legitimately carry three thousand files.
 
 ## Deterministic metrics: fitness and plan adherence
 
