@@ -131,6 +131,26 @@ Everything a single athlete owns — **one athlete per database**:
     `ActivityStream` row (`stream_type="w_bal"`, joules per second), following the `torque`
     precedent including its reprocess backfill. When CP can't be fit, both columns stay NULL
     and no stream is written — no W′ is invented.
+- **Bulk import jobs** in `import_jobs` (issue #36) — one row per import of activity files:
+  `status` (`pending` / `running` / `completed` / `failed`), `source_name`, the counts
+  (`total_files`, `imported`, `skipped_duplicate`, `failed`), a JSON `results` list carrying
+  one `{filename, outcome, reason, activity_id, format}` entry per file, and an `error` for
+  when the *job* itself died as opposed to one file. The job is a row rather than a response
+  because a Strava bulk export is thousands of files and tens of minutes of parsing — not a
+  request a browser can hold open — so the endpoint returns an id and the client polls it.
+
+    The per-file list is the part that earns its storage. "847 of 900 imported" is not
+    something an athlete can act on; naming the 53 that were not, with the reason for each, is.
+    `total_files` stays 0 until the archives have been walked, which is why progress is
+    reported as `processed`/`total` rather than as a percentage — a percentage of an unknown
+    total is a lie with a number on it.
+
+    `ActivitySource` gained a `format` column (`fit` / `gpx` / `tcx`) at the same time.
+    Originals are stored **in the format they arrived in** rather than normalised to FIT on
+    ingest: normalising would keep `has_fit_file`, the download and reprocess on a single path,
+    but it is lossy and it means the file an athlete downloads is not the file they uploaded.
+    Both readers dispatch on the column instead. NULL means the row predates the column, in
+    which case it is a FIT — nothing else could have been stored.
 - **goals**, training **plans** (with planned workouts), and standalone **workout** definitions.
   Each goal also carries on-demand AI-guidance columns (`guidance`, `guidance_verdict`,
   `guidance_status`, `guidance_updated_at`) — the streamed coach prose, its parsed
@@ -195,8 +215,12 @@ tables on first initialization.
 Sensitive data is encrypted at rest and **re-keyed per user**:
 
 - **Provider tokens** — `EncryptedString` columns in `provider_connections`.
-- **FIT files** — written to the user's directory and encrypted on disk, derived from the
-  user's key (`info="user-key:{user_id}"`).
+- **Activity files** — written to the user's directory and encrypted on disk, derived from the
+  user's key (`info="user-key:{user_id}"`). Whatever format the original arrived in: a GPX is
+  stored as a GPX. A bulk import stages its archive under
+  `users/{id}/uploads/imports/{job_id}/` and deletes that directory when the job ends,
+  whatever the outcome; only the files that became activities are moved into the uploads
+  directory and encrypted.
 
 Because keys are scoped to `user_id`, a user's data is cryptographically isolated even though all
 users share one instance.

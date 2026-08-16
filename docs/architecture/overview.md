@@ -14,7 +14,7 @@ flowchart LR
     subgraph Private["Private (may be behind NAT)"]
         Web["Web app<br/>(Next.js)"]
         API["Backend API<br/>(FastAPI + openkoutsi core)"]
-        Store[("SQLite storage<br/>registry + per-user DBs<br/>+ encrypted FIT files")]
+        Store[("SQLite storage<br/>registry + per-user DBs<br/>+ encrypted activity files")]
     end
     Web --> API
     API --> Store
@@ -31,7 +31,7 @@ flowchart LR
 |---|---|---|
 | **Web app** | [`openkoutsi-web`](https://github.com/openkoutsi/openkoutsi-web) | Next.js UI. Talks to the backend over the REST API with a JWT bearer token. |
 | **Backend API** | [`openkoutsi-backend`](https://github.com/openkoutsi/openkoutsi-backend) | FastAPI application: authentication, REST endpoints, the activity-sync pipeline, metrics, and LLM features. Owns all storage. |
-| **`openkoutsi` core library** | `openkoutsi-backend` (`openkoutsi/`) | Pure-Python domain logic with no web/DB dependencies: FIT parsing, training math, workout categorization, plan building, and workout export formats. |
+| **`openkoutsi` core library** | `openkoutsi-backend` (`openkoutsi/`) | Pure-Python domain logic with no web/DB dependencies: activity-file parsing (FIT, GPX, TCX — all producing the same `Profile`), training math, workout categorization, plan building, and workout export formats. |
 | **Strava bridge** | `openkoutsi-backend` (`strava_bridge/`) | Standalone public webhook receiver for Strava. Queues events for the main app to poll. |
 | **Wahoo bridge** | `openkoutsi-backend` (`wahoo_bridge/`) | Standalone public webhook receiver for Wahoo. Queues events for the main app to poll. |
 
@@ -79,7 +79,7 @@ retention policy are defined in the
 | Backend | Python 3.12 · FastAPI · SQLAlchemy 2 (async) · Alembic |
 | Database | SQLite (WAL mode) — one registry DB + one DB per user |
 | Auth | JWT (`python-jose` · `passlib`) |
-| FIT parsing | `fitdecode` (via the `openkoutsi` core library) |
+| Activity-file parsing | `fitdecode` for FIT; the standard library's streaming XML for GPX and TCX (via the `openkoutsi` core library) |
 | Frontend | Next.js 15 · TypeScript · Tailwind CSS · Recharts |
 | Packaging | `uv` (Python) · `npm` (web) |
 | Integrations | Strava & Wahoo OAuth + webhook bridges; optional OpenAI-compatible LLM; optional transactional email (Lettermint / EuroMail, EU-based) for signup verification + password reset |
