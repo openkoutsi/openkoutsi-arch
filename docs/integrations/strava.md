@@ -17,10 +17,19 @@ The Strava bridge (`strava_bridge/`) is a standalone public FastAPI service.
 - **`GET /webhook`** — Strava subscription verification. Strava calls it with
   `hub.mode=subscribe`, `hub.verify_token`, and `hub.challenge`; the bridge echoes back
   `hub.challenge` when the verify token matches its `bridge_secret`.
-- **`POST /webhook`** — receives an event. The bridge optionally validates the
-  `X-Hub-Signature-256` HMAC against the configured `strava_client_secret` (accepted when the
-  header is absent or the secret is unset, since Strava does not always sign). Only events with
-  `object_type == "activity"` are queued; everything else is acknowledged and dropped.
+- **`POST /webhook`** — receives an event. **Unauthenticated.** Strava documents the
+  `hub.challenge` handshake and nothing else: no signing secret, no header, no statement of
+  which bytes would be signed. The bridge does hold an `X-Hub-Signature-256` HMAC check against
+  `strava_client_secret`, but it ships off (`strava_verify_webhook_signature = False`) — with it
+  on, the fail-closed path answered every real delivery `401`, because Strava sends no such
+  header. Only events with `object_type == "activity"` are queued; everything else is
+  acknowledged and dropped.
+
+  What carries the trust instead: the activity-only filter above, the unknown-owner drop during
+  polling below, the re-fetch from Strava's own API (a forged payload asks for a sync, it cannot
+  supply data), and `max_queue_events` bounding a flood. Turn the check back on once Strava
+  documents the header, the secret, and the validation sequence — and confirm the documented
+  scheme matches the implementation first.
 
 Queued events record the aspect type (create/update/delete), the Strava owner id, and the raw
 payload.
@@ -47,7 +56,7 @@ sequenceDiagram
     participant B as Strava bridge
     participant A as Main app
     S->>B: POST /webhook (activity event)
-    B->>B: verify HMAC (optional), queue activity events
+    B->>B: queue activity events (signature check off by default)
     A->>B: GET /events/pending
     B-->>A: events
     A->>S: fetch activity streams (refresh token if needed)
@@ -62,7 +71,8 @@ sequenceDiagram
 | `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET` | Main app | OAuth app credentials |
 | `BRIDGE_URL` | Main app | Base URL of the deployed Strava bridge to poll |
 | `BRIDGE_SECRET` | Main app **and** bridge | Shared secret for polling auth and hub verification |
-| `STRAVA_CLIENT_SECRET` | Bridge | Used to validate `X-Hub-Signature-256` (optional) |
+| `STRAVA_VERIFY_WEBHOOK_SIGNATURE` | Bridge | Require `X-Hub-Signature-256` — **off**; Strava does not document webhook signing |
+| `STRAVA_CLIENT_SECRET` | Bridge | Validates `X-Hub-Signature-256`; only read when the flag above is on |
 
 Deploy `strava_bridge/` to a public HTTPS URL and register that URL as the Strava webhook
 subscription callback.
