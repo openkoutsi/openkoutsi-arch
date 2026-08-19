@@ -12,7 +12,8 @@ contract that is consistent and predictable across every resource.
 ## Tags
 
 Operations are grouped by tag: `auth`, `athlete`, `activities`, `metrics`, `goals`, `plans`,
-`workouts`, `achievements`, `integrations`, `messages`, `admin`, and `public`.
+`workouts`, `achievements`, `integrations`, `messages`, `bikes`, `courses`, `admin`, and
+`public`.
 
 ## Conventions
 
@@ -122,9 +123,15 @@ GET  /goals/{goal_id}/guidance   # getGoalGuidance → GoalGuidanceResponse
 
 `GoalGuidanceResponse` carries `status`, `verdict` (`realistic`/`ambitious`/`unrealistic`),
 `guidance` (the streamed prose, with the leading `REALISM:` tag stripped), and `updated_at`.
-The daily training-status endpoints (`POST/GET /athlete/training-status`) use the same shape.
-Both are gated by the LLM subscription check and return `403 llm_subscription_required` when
-denied on a gated instance.
+The daily training-status endpoints (`POST/GET /athlete/training-status`) and the course
+pacing plan (`POST/GET /courses/{course_id}/plan`) use the same shape. All are gated by the
+LLM subscription check and return `403 llm_subscription_required` when denied on a gated
+instance.
+
+Course *analysis* deliberately does **not** use this pattern. Parsing and solving a course is
+arithmetic measured in hundreds of milliseconds, so `POST /courses` returns the finished
+segment table and a bad file is an immediate `400`/`422` — a job to poll would buy nothing and
+cost a round trip. Only the written plan, which calls a model, is asynchronous.
 
 ## Example: a paginated collection
 
