@@ -310,8 +310,9 @@ change per event.
 ### Synchronous, unlike bulk import
 
 Parse, thin, smooth, segment and solve is pure arithmetic in the low hundreds of milliseconds
-for a typical course, so `POST /api/courses` returns the finished analysis rather than a job to
-poll — a bad file is an immediate 400/422 instead of a status an athlete has to fetch to
+for a typical course — and bounded for an untypical one, since the thinned point count is
+capped and the dissolve pass is linear rather than quadratic in the segment count — so
+`POST /api/courses` returns the finished analysis rather than a job to poll — a bad file is an immediate 400/422 instead of a status an athlete has to fetch to
 discover. The CPU-bound part still runs through `asyncio.to_thread`. The **written plan** is the
 opposite and is always asynchronous, following goal guidance exactly.
 

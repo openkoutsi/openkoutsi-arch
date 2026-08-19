@@ -188,8 +188,20 @@ Everything a single athlete owns — **one athlete per database**:
     to the `updated_at` that makes the pending timeout an inactivity budget, so
     `stranded_runs` settles them at boot with everything else.
 
+    They add one column the guidance shape has no need of: **`plan_run_id`**, the token a
+    plan run owns its columns by. Guidance is only ever cleared by the run that owns it;
+    a course plan can be invalidated *from outside*, because re-analysing the course makes
+    prose about the old segment table wrong. Nulling the columns cannot express that — the
+    generator holds its own session and commits after the request that cleared them, so it
+    would write the stale plan straight back and end on `done` with splits keyed to distances
+    that no longer exist. The trigger stamps the token, re-analysis and `settle_course_plan`
+    clear it, and a run that no longer holds it discards its own writes.
+
     `course_tracks` is the thinned track — one row per course, points as a JSON series in the
-    `ActivityStream` manner rather than a row per point. It is a separate table on purpose:
+    `ActivityStream` manner rather than a row per point. The point count is capped
+    (`openkoutsi.course.MAX_THINNED_POINTS`), because an unbounded count is an unbounded row
+    and re-analysis re-materialises it in full: past the cap the spacing widens, so an absurdly
+    long upload degrades in resolution rather than in size. It is a separate table on purpose:
     reading a course, listing courses and building the LLM prompt all touch rows with nothing
     location-shaped in them, and only re-analysis loads this one. `course_segments` is the
     `ActivityInterval` of a course, replaced wholesale when an analysis is re-run.
