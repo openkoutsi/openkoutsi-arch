@@ -234,10 +234,12 @@ Two differences between the formats are real and are handled rather than hidden:
 - **GPS is discarded at parse time.** The parsers use coordinates only to derive distance and
   elevation gain (`openkoutsi/geo.py`), and `Profile` has no field that could carry one — so
   coordinates cannot reach `ActivityStream` even by mistake. `gpx.extract_route()` is the
-  deliberate, separately-named exception, returning geometry for in-memory route analysis; the
-  ingestion path does not call it, and `tests/integration/test_activity_import.py` asserts that
-  an imported GPX leaves no coordinate anywhere in the database, whitelisting the permitted
-  stream channels rather than blocklisting forbidden ones.
+  deliberate, separately-named exception, returning geometry a caller has to ask for by name;
+  the ingestion path does not call it, and `tests/integration/test_activity_import.py` asserts
+  that an imported GPX leaves no coordinate anywhere in the database, whitelisting the permitted
+  stream channels rather than blocklisting forbidden ones. Its one persisting caller is
+  [course recon](#course-recon-issue-55), which is a different artifact and a decided exception
+  rather than a hole in this one.
 
 ### The runner
 
@@ -270,6 +272,66 @@ A second job while one is pending or running is refused with 409 rather than que
 writing to one SQLite database interleave badly, and the athlete has no reason to want it. The
 rate limit is on **jobs** (5/hour), because a job is the unit of work an athlete asks for and one
 may legitimately carry three thousand files.
+
+## Course recon (issue #55)
+
+A *course* is a route the athlete is about to ride, uploaded on purpose for pacing analysis.
+It is the one place route geometry is persisted, per the decision recorded in issue #54, and
+the layout exists to keep that exception from spreading.
+
+### Where the coordinates stop
+
+`openkoutsi/course.py` is pure math, beside `training_math` rather than in the backend: thin to
+~8 m spacing, smooth elevation over a **distance** window, derive gradient, segment, and solve
+the steady-state power balance for speed. Smoothing before differentiating is the load-bearing
+step — differencing raw samples swings gradients tens of percent between points — and the
+window lives in `geo.py` as a sibling of the existing sample-count smoother so climb detection
+(issue #39) shares one implementation rather than growing a second.
+
+`CourseTrack` is the only type in that module carrying latitude and longitude, and
+`analyze_course()` **does not accept one**: it takes the coordinate-free profile that
+`course_profile()` produces. So everything downstream of a single conversion call — the
+analysis, the rows, the API schemas, the prompt builder — is typed such that a coordinate
+cannot reach it.
+
+### Storage
+
+| What | Where | Why |
+|---|---|---|
+| The original GPX | Encrypted on disk under an **opaque storage key** (a bare filename resolved against the user's upload directory) | Same HKDF-derived per-user file key as FIT files. A bare key rather than an absolute path because issue #51 exists to purge the two that are already persisted; a new blob type must not add a third |
+| The thinned track | `course_tracks`, one row per course, points as a JSON series | Its own table so that reading a course, listing courses and building the plan prompt all touch rows with nothing location-shaped in them. Loaded only by re-analysis |
+| Metadata, inputs, chart profile, pacing outcome | `courses` | Coordinate-free. The `plan_*` columns copy `Goal.guidance*` exactly, so `stranded_runs` settles them at boot like every other streamed surface |
+| Per-segment physics | `course_segments` | The `ActivityInterval` of a course — numbered, ordered, replaced wholesale on re-analysis |
+
+`bikes` is a small equipment concept the physics needs: tyre width selects a rolling-resistance
+coefficient, riding position a drag area. A table rather than athlete fields because the inputs
+change per event.
+
+### Synchronous, unlike bulk import
+
+Parse, thin, smooth, segment and solve is pure arithmetic in the low hundreds of milliseconds
+for a typical course — and bounded for an untypical one, since the thinned point count is
+capped and the dissolve pass is linear rather than quadratic in the segment count — so
+`POST /api/courses` returns the finished analysis rather than a job to poll — a bad file is an immediate 400/422 instead of a status an athlete has to fetch to
+discover. The CPU-bound part still runs through `asyncio.to_thread`. The **written plan** is the
+opposite and is always asynchronous, following goal guidance exactly.
+
+An unachievable target time is a **result, not an error**: the response carries `feasible:
+false`, a reason code, and the intensity the target would actually demand — and the athlete
+still gets the segment table.
+
+### The route/LLM wall
+
+Cross-user isolation comes free from the per-user database. Keeping coordinates out of the LLM
+context and off the MCP surface does not, so it is enforced and tested on purpose:
+
+- The plan prompt builder takes the `Course` row, its `CourseSegment` rows and the `Athlete` —
+  types with no field that could carry a coordinate — and the model is told to reason only from
+  that table and do no arithmetic.
+- Stage 1 registers **no course tool at all**. A test walks the registry asserting no tool
+  names or describes a course, and another seeds a course with a track and exercises every tool
+  asserting its coordinates appear in no result.
+- A test captures the outgoing LLM request payload and asserts the same.
 
 ## Deterministic metrics: fitness and plan adherence
 

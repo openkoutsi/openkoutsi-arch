@@ -12,7 +12,7 @@ action, nothing is ever sent to a model and every other feature keeps working.
 
 ## The features
 
-Six services under `backend/app/services/` use the LLM. Every one of them builds its own
+Seven services under `backend/app/services/` use the LLM. Every one of them builds its own
 prompt server-side; there is no general-purpose passthrough:
 
 | Feature | Service | Shape |
@@ -20,9 +20,18 @@ prompt server-side; there is no general-purpose passthrough:
 | **Activity analysis** | `llm_activity_analyzer` | Streaming prose — optionally [agentic](#the-agentic-path-issue-43) |
 | **Daily training status** | `llm_training_status_analyzer` | Streaming prose — optionally [agentic](#the-agentic-path-issue-43) |
 | **Goal guidance** | `llm_goal_guidance` | Streaming prose |
+| **Course pacing plan** | `llm_course_plan` | Streaming prose |
 | **AI plan generation** | `llm_plan_generator` | One-shot JSON |
 | **AI workout generation** | `llm_workout_generator` | One-shot JSON |
 | **Conversational Koutsi** | `llm_chat` | Streaming prose — [always agentic](#conversational-koutsi-issue-44) |
+
+The **course pacing plan** (`llm_course_plan`, issue #55) is the newest and the most tightly
+constrained: the physics has already produced a segment table, so the model is handed that
+table and told to do no arithmetic and to invent no local knowledge about a road it has no
+information on. It is given the **derived table and never the track** — see
+[the route/LLM wall](backend.md#the-routellm-wall), which is a rule enforced by the types the
+prompt builder accepts and asserted by tests, not a structural guarantee the per-user database
+provides for free.
 
 The two coaching surfaces can additionally run as an **agent loop over the MCP tools** rather
 than from a hand-built prompt; that is an opt-in variation on the same trigger → task → DB →

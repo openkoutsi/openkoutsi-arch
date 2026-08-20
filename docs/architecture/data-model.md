@@ -27,10 +27,12 @@ flowchart TD
         Goals["goals"]
         Plans["plans + planned workouts"]
         Work["workout definitions"]
+        Crs["courses + tracks + segments, bikes"]
         Msg["message inbox"]
     end
     subgraph Files["Filesystem"]
-        Fit["encrypted FIT files (per user)"]
+        Fit["encrypted activity files (per user)"]
+        Crsf["encrypted course GPX (per user)"]
         Av["avatars (per user)"]
     end
     U -->|owns| PerUser
@@ -173,6 +175,42 @@ Everything a single athlete owns — **one athlete per database**:
   the history no longer supports. The two timestamps do different jobs — `achieved_on` is derived
   from the history (back-filling an old ride moves it *earlier*, never to today), while
   `created_at` is wall-clock and only drives the "new" marker and the inbox notification.
+- **Courses** (issue #55) in `courses`, `course_tracks`, `course_segments`, plus the `bikes`
+  they are solved for. This is the one place route geometry is persisted, per the decision in
+  issue #54, and the split across three tables is what keeps that exception contained.
+
+    `courses` carries only **coordinate-free** data: the metadata, the athlete's inputs (target
+    time, start time, an optional `goal_id`), a snapshot of the FTP and weight the last
+    analysis used, a ≤400-point `[distance, elevation, gradient]` chart profile, and the pacing
+    outcome. An unachievable target is stored as an outcome rather than an error — `feasible`
+    false with a `refusal_reason` and the intensity it would have taken — because refusing is
+    an answer the athlete asked for. The `plan_*` columns copy `Goal.guidance*` exactly, down
+    to the `updated_at` that makes the pending timeout an inactivity budget, so
+    `stranded_runs` settles them at boot with everything else.
+
+    They add one column the guidance shape has no need of: **`plan_run_id`**, the token a
+    plan run owns its columns by. Guidance is only ever cleared by the run that owns it;
+    a course plan can be invalidated *from outside*, because re-analysing the course makes
+    prose about the old segment table wrong. Nulling the columns cannot express that — the
+    generator holds its own session and commits after the request that cleared them, so it
+    would write the stale plan straight back and end on `done` with splits keyed to distances
+    that no longer exist. The trigger stamps the token, re-analysis and `settle_course_plan`
+    clear it, and a run that no longer holds it discards its own writes.
+
+    `course_tracks` is the thinned track — one row per course, points as a JSON series in the
+    `ActivityStream` manner rather than a row per point. The point count is capped
+    (`openkoutsi.course.MAX_THINNED_POINTS`), because an unbounded count is an unbounded row
+    and re-analysis re-materialises it in full: past the cap the spacing widens, so an absurdly
+    long upload degrades in resolution rather than in size. It is a separate table on purpose:
+    reading a course, listing courses and building the LLM prompt all touch rows with nothing
+    location-shaped in them, and only re-analysis loads this one. `course_segments` is the
+    `ActivityInterval` of a course, replaced wholesale when an analysis is re-run.
+
+    `bikes` exists because the physics needs tyre width (rolling resistance) and riding
+    position (drag area), and nothing on the athlete described the bike. A table rather than
+    profile fields because those inputs change per event. Both `courses.bike_id` and
+    `courses.goal_id` are `ON DELETE SET NULL`: deleting a bike or a goal must never take a
+    course with it.
 - The user's **message inbox**.
 - **Koutsi conversations** (issue #44) in `chat_conversations` / `chat_messages`. Like the inbox,
   the database file identifies the owner, so there is no owner column and no `WHERE user_id = …`
@@ -221,6 +259,12 @@ Sensitive data is encrypted at rest and **re-keyed per user**:
   `users/{id}/uploads/imports/{job_id}/` and deletes that directory when the job ends,
   whatever the outcome; only the files that became activities are moved into the uploads
   directory and encrypted.
+- **Course files** — the uploaded GPX, in the same directory and under the same derived key,
+  with one difference that matters: the row stores an **opaque storage key** (a bare filename,
+  resolved against the user's upload directory with a containment check at read time) rather
+  than the absolute path `ActivitySource.fit_file_path` and `Athlete.avatar_path` persist.
+  Issue #51 exists to convert those two; a blob type landing after it was written should not
+  add a third.
 
 Because keys are scoped to `user_id`, a user's data is cryptographically isolated even though all
 users share one instance.
