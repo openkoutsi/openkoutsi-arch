@@ -179,12 +179,17 @@ Everything a single athlete owns — **one athlete per database**:
   they are solved for. This is the one place route geometry is persisted, per the decision in
   issue #54, and the split across three tables is what keeps that exception contained.
 
-    `courses` carries only **coordinate-free** data: the metadata, the athlete's inputs (target
-    time, start time, an optional `goal_id`), a snapshot of the FTP and weight the last
+    `courses` carries only **coordinate-free** data: the metadata, the athlete's inputs (a
+    target, start time, an optional `goal_id`), a snapshot of the FTP and weight the last
     analysis used, a ≤400-point `[distance, elevation, gradient]` chart profile, and the pacing
     outcome. An unachievable target is stored as an outcome rather than an error — `feasible`
     false with a `refusal_reason` and the intensity it would have taken — because refusing is
-    an answer the athlete asked for. The `plan_*` columns copy `Goal.guidance*` exactly, down
+    an answer the athlete asked for.
+
+    The target is `target_time_s` **or** `target_power_w` (issue #61), never both: the API
+    clears one when the other is set and refuses a request carrying both. That rule lives in
+    the API rather than in a CHECK constraint because SQLite cannot add one to an existing
+    table without rebuilding it, and a rebuild is a far bigger risk than the rule is worth. The `plan_*` columns copy `Goal.guidance*` exactly, down
     to the `updated_at` that makes the pending timeout an inactivity budget, so
     `stranded_runs` settles them at boot with everything else.
 
