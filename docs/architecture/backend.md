@@ -316,9 +316,29 @@ capped and the dissolve pass is linear rather than quadratic in the segment coun
 discover. The CPU-bound part still runs through `asyncio.to_thread`. The **written plan** is the
 opposite and is always asynchronous, following goal guidance exactly.
 
-An unachievable target time is a **result, not an error**: the response carries `feasible:
-false`, a reason code, and the intensity the target would actually demand — and the athlete
-still gets the segment table.
+### Two targets, and what each can refuse (issue #61)
+
+A course is paced to a finish time, to an **average power**, or to neither — never to both.
+`solve_target_time()` and `solve_target_power()` are the same bisection over the intensity `k`
+the effort model scales from, run against different measurements of the same plan: total
+duration, or the time-weighted average power. That is what makes them agree — solve for a time,
+read the average power the plan asks for, ask for that power back, and the same ride comes out.
+Neither is a per-segment prescription: the gradient weighting spends on the climbs and eases on
+the descents in both.
+
+An unachievable target is a **result, not an error**: the response carries `feasible: false`, a
+reason code, and the intensity the target would actually demand — and the athlete still gets
+the segment table. What differs is whether it also gets the *splits*:
+
+| Target | Can refuse with | Splits |
+|---|---|---|
+| Finish time | `target_faster_than_physics`, `exceeds_sustainable_power` | Dropped — an impossible time describes no ride, so the row keeps a bare segment table |
+| Average power | `exceeds_sustainable_power` only | **Kept** — a power target names an effort, and an effort is always rideable; the only question is for how long, and the splits are what answer it |
+
+The API enforces the exclusivity the model assumes: setting one target clears the other, and a
+request naming both is a 422 rather than a guess at precedence. Both are set on upload or
+changed afterwards through `POST /api/courses/{id}/reanalyze`, which re-solves from the stored
+track — the reason that track is kept.
 
 ### The route/LLM wall
 
