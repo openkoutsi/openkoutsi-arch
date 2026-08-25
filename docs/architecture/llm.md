@@ -385,6 +385,35 @@ Layers under the prompt, because a system prompt is a first line and not a bound
 - **BYOK is a ceiling.** A user pointing openkoutsi at their own model can make it say anything.
   Guardrails are enforced where openkoutsi owns the request; the docs say the rest is theirs.
 
+### Knowing what day it is
+
+Every other surface states the date in a brief the backend writes —
+`_build_agentic_user_prompt` puts it there because every judgement in a daily card turns on it.
+Chat has no brief: its last message is the athlete's own question. So `llm_chat._CHAT_TIME_CONTEXT`
+puts the clock in the **system prompt**, between the scope policy and the tool guidance, because
+resolving "yesterday's session" into a date is the first half of deciding what to look up.
+
+Leaving it out was not a neutral omission. "How did today's session go?" and "should I move
+tomorrow's ride?" are ordinary questions on this surface, and nothing in a tool result contradicts
+a wrong "today" — so an answer about the wrong day looks exactly like an answer about the right
+one.
+
+The block carries the local time, weekday, date and zone, and spells out **yesterday's and
+tomorrow's dates** rather than leaving them as arithmetic: a few tokens to buy past the one
+calculation models reliably get wrong. Two smaller rules ride along — the time of day (a session
+dated today is still ahead of the athlete at breakfast and behind them at bedtime), and that
+earlier messages in a stored conversation may have been written on earlier days, so a "today" in
+one of them is not today.
+
+!!! warning "One clock, or every date is off by one"
+    The instant is the athlete's own `local_now`, the same one whose `date()` becomes
+    `AgentRequest.today`. At nine in the morning in Auckland the server's UTC date is still
+    yesterday, so a model reading tool results dated from one calendar and a prompt dated from
+    another would be off by one on every lookup. `build_chat_system_prompt` takes `now` for
+    exactly this reason rather than calling `date.today()` itself; the UTC fallback is for callers
+    with no athlete to hand (`llm-eval`, tests), on the grounds that the wrong zone is a much
+    smaller error than no date at all.
+
 ### Storage: dialogue only
 
 `chat_conversations` / `chat_messages` in the per-user DB, following the inbox precedent — the
