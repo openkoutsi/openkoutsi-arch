@@ -118,8 +118,17 @@ flowchart TD
 
 Because two providers can deliver the same ride almost simultaneously (a Wahoo webhook and a
 Strava sync firing within milliseconds), the dedup-window query and the create/attach step run
-under a **per-user activity lock**, and the new row is **committed before the lock is released**.
-This prevents two concurrent syncs from each seeing an empty window and creating duplicates.
+under **two guards**, both entered through `provider_sync.activity_create_guard` — an
+`asyncio.Lock` in front as the free fast path, and a `sync_leases` row behind it
+(`db/leases.py`). The lock settles the common case without touching the database, but it speaks
+only for one event loop; the lease repeats the same exclusion where every writer of that database
+can see it, so the guarantee survives a second process. All five activity writers take it:
+provider sync, single upload, bulk import, and both webhook paths.
+
+The new row is **committed before the guards are released**, and that is the load-bearing part: a
+flush alone would leave the next holder looking at an empty window and creating a duplicate
+anyway. The lease also carries a deadline, so a writer that dies inside the section releases by
+expiry rather than wedging that athlete's imports.
 
 ### Data population
 
