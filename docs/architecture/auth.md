@@ -150,9 +150,10 @@ it is built as a default-deny control with a test behind it rather than a per-ro
   things at different times — and turn every scope question into a question about *when*.
 - **A daily `lifespan` task** sweeps the registry PAT table and sends `expiring_7d` /
   `expiring_1d` / `expired`, each stage exactly once via `last_expiry_notice` (without which a
-  daily sweep becomes a daily nag). It sits beside the Strava and Wahoo bridge pollers, and
-  inherits their single-process assumption — two app processes would double-notify, and
-  `last_expiry_notice` is the mitigation. Tokens live in the **registry** DB and the inbox in
+  daily sweep becomes a daily nag). It sits beside the Strava and Wahoo bridge pollers and runs
+  under the same single claim on the registry, so a second app process stands by rather than
+  double-notifying; `last_expiry_notice` remains the backstop. See
+  [backend](backend.md#application-lifecycle). Tokens live in the **registry** DB and the inbox in
   each **per-user** DB, so the sweep reads registry rows then opens each affected user's session.
   Inbox always; email best-effort and opt-out per user via athlete `app_settings`. The stage is
   marked and committed **immediately after the inbox write and before the email**: `notify_user`

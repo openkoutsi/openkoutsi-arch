@@ -49,23 +49,36 @@ background = [
 ]
 ```
 
-Each bridge poller loops every 60 seconds, fetches pending events from its bridge, processes
-them, and claims them. See [Integrations](../integrations/index.md).
+Each bridge poller loops every 60 seconds and **claims a batch of events with a deadline**,
+processes them, and acks only what succeeded; a failure is nacked back to the queue with a
+backoff, and a claim nobody acks becomes deliverable again when it expires. It used to process
+first and claim afterwards, which meant a consumer that died mid-import had the event served
+again — reordering that would have turned a harmless replay into a silent loss, since the import
+is idempotent by `(provider, external_id)` but the analysis it triggers is not. See
+[Integrations](../integrations/index.md).
 
 The **token-expiry sweep** loops daily and warns users whose
 [personal access tokens](auth.md#personal-access-tokens) are about to expire. Periodic work here
 is `lifespan` asyncio tasks rather than a scheduler dependency, which is why that feature needed
-no new one — and why it inherits the pollers' **single-process assumption**: two app processes
-would double-notify, and the `last_expiry_notice` column is the mitigation.
+no new one.
+
+All three run under **one claim on the registry** (`registry_leases`, name `background-work`), so
+a second process stands by rather than running its own copy — which for the bridge pollers would
+mean draining the same events twice, and for the sweep would mean double-notifying. The claim is
+taken per *cycle* rather than held as a term of office: every lease carries a deadline, and the
+sweep's 24-hour interval is longer than any sane one. It is renewed *within* a cycle, on its own
+task so a slow drain cannot starve its own renewal, and losing it cancels the cycle in flight —
+a lapsed deadline means another process may already be doing the same work. `last_expiry_notice`
+remains the backstop against a duplicate notice.
 
 !!! note "The agent loop adds no lifespan task, and inherits the same assumption"
     The [agentic coaching path](llm.md#the-agentic-path-issue-43) runs inside the existing
     `analyze_activity_bg` / `analyze_training_status_bg` tasks — one-shot work spawned per
     trigger, not a poller — so nothing new is registered here. Its concurrency guard
     (`AGENT_MAX_CONCURRENT_RUNS`) is an in-process counter — deliberately not a semaphore, since
-    the one thing it must never do is make a run *wait* — and is bounded **per process**,
-    the same single-process assumption the pollers make: two app processes each allow their own
-    quota. That is a deliberate simplification rather than an oversight — the guard exists to
+    the one thing it must never do is make a run *wait* — and is bounded **per process**: two app
+    processes each allow their own quota. This is now one of the last places that assumption
+    survives; the pollers no longer make it. That is a deliberate simplification rather than an oversight — the guard exists to
     stop one box queueing runs against a local model that serialises requests, and a run that
     cannot get a slot degrades to the single-shot prompt rather than waiting, so overshooting
     it costs latency rather than correctness.
