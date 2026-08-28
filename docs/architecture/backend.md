@@ -28,7 +28,8 @@ flowchart TD
   plan-adherence scoring), `pr_detection`, and `notifications`.
 - **Core library** (`openkoutsi/`) — framework-agnostic domain code with no FastAPI or DB
   imports: `fit`/`fit_processing` (FIT decoding), `training_math` (training load, weighted power,
-  power/distance bests), `categorization` (Coggan zone classification), `plan_builder`,
+  power/distance bests), `categorization` (Coggan zone classification), `commute` (rule
+  matching and rule-from-history clustering, issue #63), `plan_builder`,
   `workout_schema`, and the `workout_formats/` exporters (Zwift `.zwo`, FIT workout, Wahoo plan).
 - **ORM models** (`backend/app/models/*`) — SQLAlchemy 2 async models split across the registry
   DB and the per-user DB (see [Data & storage model](data-model.md)).

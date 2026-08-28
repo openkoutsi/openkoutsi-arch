@@ -49,6 +49,17 @@ to compute weighted power, training load, intensity, category, streams, and best
   and repopulate the activity).
 - **Token refresh:** Strava tokens last ~6 hours; the pipeline refreshes when **≤30 minutes**
   remain (Strava's own recommendation).
+- **Commute flag:** the activity payload's `commute` boolean is carried on
+  `NormalizedActivity.commute` and, when true, **applies** the `commute` label outright
+  rather than suggesting it (issue #63) — it is the athlete's own tick in Strava, not a
+  heuristic of ours. Only `true` is acted on: most athletes never touch that checkbox, so
+  treating its default as a denial would let it overrule their own commute rules. It is also
+  the only provider that has one, and it does not reach the file-import path — a Strava
+  **bulk export** is a pile of FIT/GPX/TCX files, and the export's own `activities.csv`,
+  where its `Commute` column lives, is not read. Imported history therefore depends on the
+  rules instead. A commute ticked in Strava *after* the sync may not arrive at all: the
+  webhook `update` branch acts on `title` and `type`, and Strava's documented `updates`
+  payload is `title` / `type` / `private`.
 
 ```mermaid
 sequenceDiagram
