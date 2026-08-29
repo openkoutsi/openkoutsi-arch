@@ -133,6 +133,22 @@ Everything a single athlete owns — **one athlete per database**:
     `ActivityStream` row (`stream_type="w_bal"`, joules per second), following the `torque`
     precedent including its reprocess backfill. When CP can't be fit, both columns stay NULL
     and no stream is written — no W′ is invented.
+
+    Finally, an activity carries two label columns rather than one (issue #63). `labels` is
+    the athlete's own list — `race`, `commute` — and is the only one anything else reads:
+    the `commuter` badge counts it, the RPE queue excludes it, `?exclude_labels=` filters on
+    it. `label_suggestions` is what *openkoutsi* thinks, keyed by label name:
+    `{"commute": {"state": "pending"|"accepted"|"dismissed", "source": "rule:<id>"|"strava",
+    "at": …}}`.
+
+    The split is load-bearing in both directions. Writing a guess into `labels` would mint
+    achievement tiers off a heuristic *and* delete the ride from the RPE prompt — which is
+    the one surface that asks about it — so a suggestion never touches `labels` until the
+    athlete answers. And the suggestion is **persisted rather than derived on read**,
+    because a dismissal has to outlive a reprocess: a suggestion recomputed on every read
+    and re-offered after the athlete said no is worse than not detecting anything. `source`
+    records which rule fired, which is what lets the "your rules look wrong" report be read
+    straight off these rows instead of kept as counters that could drift.
 - **Bulk import jobs** in `import_jobs` (issue #36) — one row per import of activity files:
   `status` (`pending` / `running` / `completed` / `failed`), `source_name`, the counts
   (`total_files`, `imported`, `skipped_duplicate`, `failed`), a JSON `results` list carrying
