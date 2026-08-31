@@ -25,6 +25,7 @@ flowchart LR
     API <-->|"OAuth + data REST"| Strava
     API <-->|"OAuth + data REST"| Wahoo
     API -.->|optional| LLM(("LLM"))
+    API -.->|"optional, same host"| Val["Valhalla sidecar<br/>(OSM surface)"]
 ```
 
 | Component | Repository | Responsibility |
@@ -34,6 +35,7 @@ flowchart LR
 | **`openkoutsi` core library** | `openkoutsi-backend` (`openkoutsi/`) | Pure-Python domain logic with no web/DB dependencies: activity-file parsing (FIT, GPX, TCX — all producing the same `Profile`), training math, workout categorization, plan building, and workout export formats. |
 | **Strava bridge** | `openkoutsi-backend` (`strava_bridge/`) | Standalone public webhook receiver for Strava. Queues events for the main app to poll. |
 | **Wahoo bridge** | `openkoutsi-backend` (`wahoo_bridge/`) | Standalone public webhook receiver for Wahoo. Queues events for the main app to poll. |
+| **Valhalla sidecar** *(optional, off by default)* | third-party image, wired in [`openkoutsi-ops`](https://github.com/openkoutsi/openkoutsi-ops) | Map-matches an uploaded course against OSM so course recon can classify the road surface under it (issue #56). Never publicly exposed — reachable only from other containers, at `http://valhalla:8002`. The self-hoster builds and ships its tiles for their own region; the VM never builds them. Absent by default, and absent means the feature is simply not offered rather than broken. |
 
 ## Deployment topology
 
@@ -82,4 +84,4 @@ retention policy are defined in the
 | Activity-file parsing | `fitdecode` for FIT; the standard library's streaming XML for GPX and TCX (via the `openkoutsi` core library) |
 | Frontend | Next.js 15 · TypeScript · Tailwind CSS · Recharts |
 | Packaging | `uv` (Python) · `npm` (web) |
-| Integrations | Strava & Wahoo OAuth + webhook bridges; optional OpenAI-compatible LLM; optional transactional email (Lettermint / EuroMail, EU-based) for signup verification + password reset |
+| Integrations | Strava & Wahoo OAuth + webhook bridges; optional OpenAI-compatible LLM; optional transactional email (Lettermint / EuroMail, EU-based) for signup verification + password reset; optional self-hosted Valhalla sidecar for OSM road-surface classification |
