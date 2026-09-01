@@ -317,6 +317,115 @@ window lives in `geo.py` as a sibling of the existing sample-count smoother so c
 analysis, the rows, the API schemas, the prompt builder — is typed such that a coordinate
 cannot reach it.
 
+Stage 2 (issue #56) does not weaken that. Surface matching is the one thing that genuinely
+needs coordinates, and it takes them from the stored track directly; what it *returns* is
+one `[raw_value, confidence]` pair per point, which is coordinate-free by construction.
+`analyze_course()` grew a `surface_points` argument of exactly that shape, so the wall is
+still one conversion wide.
+
+## Road surface classification (issue #56)
+
+### Why the confidence layer is exact rather than a heuristic
+
+Valhalla's `trace_attributes` returns a *normalised* surface — `paved_smooth`, `paved`,
+`paved_rough`, `compacted`, `dirt`, `gravel`, `path`, `impassable` — and **no flag for
+whether OSM carried a `surface` tag at all**. It cannot be asked for one. But its parser is
+deterministic: `OSMWay` stores the surface in a three-bit field zeroed by the constructor's
+`memset`, and `kPavedSmooth` is enumerator 0, so a way carrying no surface information
+arrives as `paved_smooth`. Every other value is reachable only from an explicit `surface`,
+`tracktype`, `smoothness` or `sac_scale`/`mtb:*` tag.
+
+That gives a rule with no guesswork in it:
+
+| Matcher value | Confidence | Why |
+|---|---|---|
+| `paved_smooth` | `inferred` | Either explicitly paved or untagged, and the two are indistinguishable |
+| anything else | `confirmed` | Only an explicit tag produces it |
+| unmatched, `impassable`, unrecognised | `inferred`, class `unknown` | An unrecognised value must never fall through to a default that reads as confident |
+
+`inferred` therefore means "openkoutsi could not confirm a tag", **not** "this road is
+untagged" — a genuinely tagged asphalt road reads inferred too. It under-claims, which is
+the safe direction, and the UI and user docs use the longer wording rather than the shorter,
+wronger one. `openkoutsi/surface.py:confidence_for()` derives it from the normalised class
+rather than the raw string, so "unknown implies inferred" holds by construction instead of
+by two rules agreeing.
+
+### Severity, not length, decides what survives
+
+A dissolve pass keeps snap artefacts from shattering a route, and judging it on length alone
+would erase the single most important thing on some courses: 130 m of mud inside 40 km of
+asphalt. So `dissolve_runs()` scales the floor by **severity** — the rank distance on an
+ordered roughness scale — with three qualifications that each exist for a case:
+
+- Severity is measured against the **nearer** neighbour. A stretch of paving stones between
+  asphalt and gravel sits *between* its neighbours in roughness: it is a transition, and a
+  40 m one is an artefact. Measuring against the further neighbour would spare it.
+- Relief requires **isolation**: both neighbours must themselves be substantial. Twenty
+  alternating 50 m runs is the matcher flicking between a road and its parallel cycleway, and
+  each blip looks dramatic on its own. Nothing in a storm is trustworthy enough to pace on.
+- `HARD_MIN_RUN_M` (~40 m) is unconditional. Below a couple of match samples the match itself
+  is not evidence.
+
+`segment_by_gradient()` then honours those boundaries rather than re-deciding them: a merge
+never crosses a surface change. Putting the judgement in one place is what stops the gradient
+floor quietly swallowing a sector the surface pass just preserved — and with it that
+sector's `Crr`, and therefore its split.
+
+Confidence per segment is measured against what the matcher **originally** said, before
+dissolving: a class that exists only because a blip was absorbed reads `inferred`, so the
+dissolve cannot launder a guess into a fact.
+
+### Two phases, because surface is a different analysis
+
+Surface moves segment boundaries and changes rolling resistance, so a matched course is
+re-solved, not annotated:
+
+1. `POST /api/courses` and `/reanalyze` return a Stage 1 result synchronously, exactly as
+   before. Upload keeps its latency character, and an instance with no sidecar never waits.
+2. `services/course_surface.py` runs afterwards on its own session: match the stored track,
+   store what the matcher said on `course_tracks.surfaces`, re-solve, replace the segments.
+
+Because phase 2 works from the *stored* track, matching a new course and enriching one
+uploaded years ago are the same function — which is most of the value of enabling the
+sidecar later. `POST /api/courses/{id}/surface` invokes it directly. Re-solving for a
+different bike or target reuses the stored match and costs no round trip at all.
+
+The status columns copy `plan_*` exactly, run token included, so `stranded_runs` settles a
+match a redeploy interrupted. It settles to `unavailable` rather than `error`: nothing about
+the course is wrong, and the athlete still has a complete Stage 1 result.
+
+### Degrade, don't fail
+
+`services/surface_matcher.py` is a `SurfaceMatcher` protocol with a Valhalla implementation
+and a null one, so the engine is swappable and — more usefully — the whole suite runs against
+doubles rather than 15 GB of tiles. Unconfigured, unreachable, timing out, capped by the
+chunk budget, or snapping nothing: each returns `None` and the course keeps its Stage 1
+analysis with no error surfaced.
+
+Bounds are explicit, because a 400 km course must not be able to occupy the sidecar
+indefinitely: the track is decimated to ~25 m before sending (8 m spacing would be 50 000
+points), chunked at 1 000 points with 50 of overlap, capped at 60 chunks and a total
+wall-clock budget. **The overlap is used as evidence, not just seam glue** — a point matched
+in two chunks yields two independent answers, and disagreement downgrades it, which matters
+precisely because the severity rule that keeps a real short sector is the one a bad snap
+could exploit to invent one.
+
+Failures are cached negatively with an expiry, following `bridge_client`, so an unreachable
+sidecar is not hammered on every upload but is still noticed when it comes back.
+
+### The switch
+
+`allow_course_recon` gates the whole feature and **defaults off**, breaking the convention
+`allow_mcp_server` and `allow_personal_access_tokens` set. Those publish an interface over
+data the caller's credential already reaches; this one needs infrastructure the instance may
+not have, so absent reads as no. It is visible on upgrade and documented as such in
+`DEPLOY.md`.
+
+Off refuses the **capability**: the courses and bikes routers, the background matcher (the
+check is inside the job, not only on the route that schedules it — the mistake the PAT gate
+made by checking issuance and leaving `/mcp` open), and the plan generator. It does **not**
+refuse the GDPR export, and it deletes nothing.
+
 ### Storage
 
 | What | Where | Why |

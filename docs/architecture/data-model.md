@@ -27,7 +27,7 @@ flowchart TD
         Goals["goals"]
         Plans["plans + planned workouts"]
         Work["workout definitions"]
-        Crs["courses + tracks + segments, bikes"]
+        Crs["courses + tracks + segments, bikes<br/>(+ surface & confidence)"]
         Msg["message inbox"]
     end
     subgraph Files["Filesystem"]
@@ -226,6 +226,30 @@ Everything a single athlete owns — **one athlete per database**:
     reading a course, listing courses and building the LLM prompt all touch rows with nothing
     location-shaped in them, and only re-analysis loads this one. `course_segments` is the
     `ActivityInterval` of a course, replaced wholesale when an analysis is re-run.
+
+    **Surface classification (issue #56)** adds nullable columns to all three. On
+    `course_segments`: the class, its confidence, the raw matcher value preserved rather
+    than discarded, and the `Crr` the row was solved with — so a number the athlete is
+    asked to trust can be inspected. On `courses`: the `surface_*` status columns, copying
+    the `plan_*` shape (run token included) so `stranded_runs` settles an interrupted match,
+    plus **`surface_ribbon`** — the surface at full run resolution, run-length encoded as
+    `[start_m, end_m, class, confidence, severity_step]`.
+
+    That ribbon is a separate column rather than something derived from `course_segments`
+    because the two have different jobs. The segment table is pacing-shaped and keeps a
+    minimum row length; the ribbon has none. A 130 m sector of mud inside 40 km of asphalt
+    is the most important thing on that course, and it has to stay drawable and nameable
+    even where the pacing rows quite reasonably fold it into a longer one. The rough-sector
+    list the API serves is derived from the ribbon rather than stored beside it — a second
+    copy is a second thing that can disagree.
+
+    `course_tracks` gains `surfaces`: `[[raw_value, confidence], …]` aligned to `points`.
+    Only what the matcher said is stored; the class and every dissolving decision are
+    re-derived on read, so tuning a threshold later re-reads correctly from what is already
+    on disk instead of needing every stored course re-matched. It lives on this table
+    because it is the same length as the track and, like the track, is loaded only by
+    re-analysis — listing courses and building the plan prompt keep touching rows with
+    nothing per-point in them.
 
     `bikes` exists because the physics needs tyre width (rolling resistance) and riding
     position (drag area), and nothing on the athlete described the bike. A table rather than
