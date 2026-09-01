@@ -421,10 +421,17 @@ data the caller's credential already reaches; this one needs infrastructure the 
 not have, so absent reads as no. It is visible on upgrade and documented as such in
 `DEPLOY.md`.
 
-Off refuses the **capability**: the courses and bikes routers, the background matcher (the
+Off refuses the **capability**: the courses router, the background matcher (the
 check is inside the job, not only on the route that schedules it — the mistake the PAT gate
 made by checking issuance and leaving `/mcp` open), and the plan generator. It does **not**
 refuse the GDPR export, and it deletes nothing.
+
+The `bikes` router **was** behind this switch and no longer is (issue #64). The original
+reasoning — a bike exists for nothing but course pacing, so a form for an unavailable feature
+is worse than no form — stopped being true when the garage made a bike the record of an
+athlete's own kilometres, maintenance history and equipment. None of that depends on whether
+the self-hoster has a Valhalla sidecar, so the gate now sits only where the capability
+actually is.
 
 ### Storage
 
@@ -437,7 +444,39 @@ refuse the GDPR export, and it deletes nothing.
 
 `bikes` is a small equipment concept the physics needs: tyre width selects a rolling-resistance
 coefficient, riding position a drag area. A table rather than athlete fields because the inputs
-change per event.
+change per event. Issue #64 **extended these same rows** into the garage rather than adding a
+second table beside them — see [The garage](#the-garage-issue-64) below.
+
+## The garage (issue #64)
+
+The bikes an athlete owns, rides and maintains: `bikes` extended with a baseline odometer, the
+sports it claims and a retirement date, plus `bike_maintenance` / `bike_accessories` and
+`activities.bike_id` / `bike_source`. The [data model](data-model.md) covers the schema and why
+each column exists; what matters here is where the code hangs.
+
+**`services/garage.py` is the orchestration, `openkoutsi/sport_matching.py` the vocabulary.**
+A bike's `default_sports` holds canonical cycling `sport_type` strings normalised through
+`canonical_sport_type`, so `gravel_ride` and `GravelRide` are one claim rather than two of
+which only one ever fires; anything outside `CYCLING_SPORT_TYPES` is refused, because a bike
+claiming `Run` would silently never match.
+
+**`assign_bike` runs on all four ingest paths** — `provider_sync._apply_import`,
+`fit_processor.process_activity_file`, `api/activities.create_manual_activity` and
+`reprocess_activity` — the same four `commute.evaluate_activity` needed for the same reason.
+Missing one produces the worst bug available here: a garage whose totals are right for rides
+that arrived one way and quietly short for the rest.
+
+**Applied, not suggested** — the deliberate opposite of commute detection (issue #63), because
+no badge counts bikes, nothing is removed from any prompt, and a per-bike total counting only
+confirmed rides is a chore rather than a garage. The safety property is carried by
+`activities.bike_source`: `assign_bike` writes only where it is NULL or `"auto"`. That single
+rule is what makes an athlete's correction survive a reprocess, a re-sync, a history scan and
+an edit to what a bike claims.
+
+**Backfill is an explicit request**, `POST /api/bikes/assign-history`, batched and rate-limited
+exactly as `commute.scan_history` is and for the same reason: walking an athlete's whole
+history inside a `PATCH /api/bikes/{id}` would hold a request worker for the length of the
+scan. It touches only rows with `bike_source IS NULL`, so it can never re-home a ride.
 
 ### Synchronous, unlike bulk import
 

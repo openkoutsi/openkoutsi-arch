@@ -27,7 +27,8 @@ flowchart TD
         Goals["goals"]
         Plans["plans + planned workouts"]
         Work["workout definitions"]
-        Crs["courses + tracks + segments, bikes<br/>(+ surface & confidence)"]
+        Crs["courses + tracks + segments<br/>(+ surface & confidence)"]
+        Grg["bikes + maintenance + accessories"]
         Msg["message inbox"]
     end
     subgraph Files["Filesystem"]
@@ -256,6 +257,59 @@ Everything a single athlete owns — **one athlete per database**:
     profile fields because those inputs change per event. Both `courses.bike_id` and
     `courses.goal_id` are `ON DELETE SET NULL`: deleting a bike or a goal must never take a
     course with it.
+- **The garage** (issue #64) is the *same* `bikes` rows, extended rather than duplicated, plus
+  `bike_maintenance` and `bike_accessories` hanging off them and two columns on `activities`.
+
+    The extension-not-duplication choice is the load-bearing one. A parallel `garage_bikes`
+    table would have made "the bikes in the garage are the bikes the course picker offers" a
+    synchronisation problem — two lists, two writers, and an inevitable divergence the athlete
+    discovers by not finding a bike. Extending the row makes it true by construction, and costs
+    only that one table now serves two readers with quite different needs.
+
+    `bikes` gains `odometer_base_km` (kilometres ridden before openkoutsi existed for that bike
+    — without it every wear figure is systematically low), `default_sports` (the cycling
+    `sport_type` values it claims) and `retired_at`. Retirement rather than deletion for a sold
+    bike, because deleting rewrites the athlete's past totals: a retired bike leaves the pickers
+    and stops collecting rides while keeping every one it has.
+
+    `activities` gains `bike_id` (indexed — every per-bike distance is a `SUM` filtered on it)
+    and **`bike_source`**, which is the column this whole feature turns on. Unlike commute
+    detection (issue #63) the assignment is *applied*, not suggested: no badge counts bikes, no
+    prompt hides a ride because of one, and a per-bike total counting only individually
+    confirmed rides is a chore rather than a garage. The safety property #63 got from a
+    suggestion state is carried here by a persisted `"auto"` / `"manual"` marker instead —
+    `services/garage.assign_bike` writes only where it is NULL or `"auto"` — so a correction
+    survives a reprocess, a re-sync, a history scan and an edit to what a bike claims. It cannot
+    be inferred at read time; it has to be written down.
+
+    A sport may be claimed by **at most one bike per athlete**, enforced in the API rather than
+    by a constraint (it is a per-athlete uniqueness over a JSON list). Two bikes claiming
+    `GravelRide` has no correct resolution, so the second claim is a 409 naming the first.
+    Retired bikes are excluded from both the claim map and the collision check: retiring one
+    bike and buying its replacement is the ordinary case.
+
+    Distance is **derived on read**, never stored — `tracked_km` a `SUM` over assigned rides and
+    `lifetime_km` that plus the baseline. Reassigning a ride or correcting a baseline is then
+    immediately right everywhere, with no denormalised counter to drift; the price is one grouped
+    query per garage read, which the index makes cheap. The two are reported separately because
+    one is arithmetic on the history and the other leans on a number the athlete typed.
+
+    `bike_maintenance` is keyed by a free-text `component` rather than a foreign key to a
+    component catalogue, which is what makes "how long did these tyres last?" answerable at all:
+    component life is the delta in `odometer_km` between consecutive entries sharing the key. The
+    reading is stored **absolute**, never as an offset from anything derived, so it does not move
+    when history is re-imported, a baseline is corrected or a ride is reassigned — a maintenance
+    log that rewrites itself is worse than none. `bike_accessories` is deliberately inert: a
+    fitted trailer changes mass and CdA, but feeding that into `BikeParams` is a separate piece
+    of work with its own correctness questions, so this records the thing and moves no number.
+
+    Deletion follows the same rule the rest of this schema does — `ON DELETE` documents intent
+    and does not execute, since these SQLite connections leave `PRAGMA foreign_keys` off — so
+    `api/bikes.delete_bike` enforces each clause in Python: an explicit `UPDATE` nulls
+    `activities.bike_id` **and** `bike_source` (a `"manual"` against no bike would assert a
+    choice that cannot be true, and would then block automapping from filling the gap), and the
+    ORM `delete-orphan` cascade, which is application-level and so also pragma-independent,
+    takes the log and the accessories.
 - The user's **message inbox**.
 - **Koutsi conversations** (issue #44) in `chat_conversations` / `chat_messages`. Like the inbox,
   the database file identifies the owner, so there is no owner column and no `WHERE user_id = …`
