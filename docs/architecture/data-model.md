@@ -282,6 +282,14 @@ Everything a single athlete owns — **one athlete per database**:
     survives a reprocess, a re-sync, a history scan and an edit to what a bike claims. It cannot
     be inferred at read time; it has to be written down.
 
+    The three states are therefore `(bike, "auto")`, `(bike | NULL, "manual")` and
+    `(NULL, NULL)`, and the middle one carrying a NULL bike is load-bearing: "none of my bikes"
+    is a choice an athlete makes about a rental or a borrowed frame, and storing it as
+    `(NULL, NULL)` would file it under "never asked" — the exact predicate automapping reads as
+    free to fill, so the correction would be undone by the next reprocess. `delete_bike` is the
+    one place that *does* write both NULL, and for the opposite reason: there the bike is gone
+    and no choice was made, so automapping should be free to fill the gap.
+
     A sport may be claimed by **at most one bike per athlete**, enforced in the API rather than
     by a constraint (it is a per-athlete uniqueness over a JSON list). Two bikes claiming
     `GravelRide` has no correct resolution, so the second claim is a 409 naming the first.
