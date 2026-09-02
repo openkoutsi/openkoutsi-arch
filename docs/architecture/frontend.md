@@ -16,8 +16,8 @@ src/
 ```
 
 Routing is localized through a `[locale]` segment. Pages are organized by feature
-(dashboard, activities, plans, workouts, profile, admin, setup) and live directly under
-`app/[locale]/…`. Routing is **token-scoped** — there is no team slug in any path.
+(dashboard, activities, plans, workouts, courses, garage, profile, admin, setup) and live
+directly under `app/[locale]/…`. Routing is **token-scoped** — there is no team slug in any path.
 `middleware.ts` guards protected pages using only the non-secret `session` cookie; the backend
 remains the real authority on access.
 
