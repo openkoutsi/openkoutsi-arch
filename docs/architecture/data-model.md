@@ -1,8 +1,8 @@
 # Data & storage model
 
 openkoutsi stores everything in **SQLite** (WAL mode). Storage is a two-tier layout: one shared
-**registry database**, **one database per user**, and a small dedicated
-**LLM-usage database**.
+**registry database**, **one database per user**, and two small dedicated usage databases — an
+**LLM-usage database** and a **third-party API-usage database**.
 
 ## Two tiers
 
@@ -19,6 +19,9 @@ flowchart TD
     end
     subgraph Usage["LLM-usage DB — data/llm_usage.db (separate)"]
         LU["llm_usage (instance-paid calls only)"]
+    end
+    subgraph ApiUsage["API-usage DB — data/api_usage.db (separate)"]
+        AU["api_usage (one row per outbound<br/>Strava/Wahoo request + email,<br/>carrying that response's<br/>rate-limit reading)"]
     end
     subgraph PerUser["Per-user DB — data/users/&#123;id&#125;/user.db"]
         Ath["athlete (one per DB)"]
@@ -41,6 +44,8 @@ flowchart TD
     U --> EN
     U --> PAT
     U -.records.-> LU
+    U -.attributed to.-> AU
+    PC -.outbound calls.-> AU
     PerUser --> Files
 ```
 
@@ -90,6 +95,49 @@ user-deletion sweep is a plain `DELETE … WHERE user_id = ?`). Input and output
 **separately** — providers price them differently. **BYOK calls are never recorded**: the hoster
 pays nothing for them, so every row is instance-paid (there is no `byok` column). See the
 [LLM architecture](llm.md).
+
+### API-usage DB (`data/api_usage.db`, path configurable via `API_USAGE_DB`)
+
+A **sibling** of the LLM-usage DB rather than an extension of it — its own `ApiUsageBase`, engine,
+sessionmaker and Alembic chain (head `001`) — holding one append-only row per **outbound** call to
+a third party in a single **`api_usage`** table (`created_at`, `service`, `endpoint`, `method`,
+`status_code`, `outcome`, `duration_ms`, `user_id`, and eight `ratelimit_*` columns; indexed on
+`created_at`, `service`, `(service, created_at)` and `(user_id, created_at)`).
+
+It is a fourth database, and the reason is retention rather than tidiness: a row here is written
+per outbound **HTTP request**, so one history backfill writes thousands in a burst, while an
+`llm_usage` row is written per deliberate user action. A single shared retention setting would
+necessarily be wrong for one of the two. Keeping them apart also leaves `llm_usage.db` accurately
+named. The cost is that a combined "all third-party spend" view has to merge two queries in
+application code — acceptable, since the admin UI has separate tables anyway.
+
+Two things about the columns are deliberate:
+
+- **`endpoint` is a normalised template, never a raw URL** — `/activities/12345/streams` is stored
+  as `/activities/{id}/streams`. Raw URLs carry activity ids and, on some paths, query-string
+  credentials; headers (`Authorization` above all) are never stored at all. A redirect target on a
+  host we do not own is recorded as `<host>/*`, since its path is a signed blob.
+- **The `ratelimit_*` reading lives on the row itself** rather than in a snapshot table. Every
+  response carries the headers, so every row can carry the reading, and "current headroom" is
+  `ORDER BY created_at DESC LIMIT 1` per service — no second table and no second write path, with
+  a full history for trend charts for free. The overall quota (`ratelimit_usage_short` /
+  `_limit_short` / `_usage_daily` / `_limit_daily`) and Strava's lower read-only quota
+  (`ratelimit_read_*`) are stored **separately**: a backfill is all reads, so the read ceiling is
+  the one that binds first. Both are null for services that publish no quota (email, Wahoo).
+
+`user_id` is **nullable** — most calls are made on a user's behalf during a sync, but bridge
+polling and the pre-link OAuth exchange have no user. As with `llm_usage` there are no registry
+foreign keys, so a user-deletion sweep is a plain `DELETE … WHERE user_id = ?`.
+
+Reads go through `services/quota.py`, which is the only place that interprets a `ratelimit_*`
+reading — a reading is valid only inside the window it was observed in, and rendering a rolled-over
+window's stale number as current usage would be worse than showing nothing.
+
+Inbound **webhook** counts do not live here. Deliveries never reach the backend: they land on the
+standalone bridges, each of which keeps its own aggregate `webhook_stats` table keyed by
+`(day, outcome)` and never pruned, exposed over `GET /stats` and proxied by the admin API. The
+bridges' `webhook_events` rows are deleted after seven days, which is why a per-month figure has to
+come from counters rather than from the event table.
 
 ### Per-user DB (`data/users/{user_id}/user.db`)
 
@@ -378,8 +426,13 @@ users share one instance.
 
 ## Migrations
 
-Schema changes are managed with **Alembic**. There are three migration environments: one for the
-registry DB, one for the per-user DB schema (applied to each user database), and one for the
-separate LLM-usage DB.
+Schema changes are managed with **Alembic**. There are four migration environments: one for the
+registry DB, one for the per-user DB schema (applied to each user database), one for the separate
+LLM-usage DB, and one for the separate API-usage DB. Only the registry chain is applied
+automatically by the container entrypoint; both usage databases are created by `create_all` at
+startup and their chains are applied by hand on upgrade.
+
+The bridges have no Alembic at all — their `webhook_stats` table is created by `create_all`, which
+is enough because it is purely additive to an existing bridge database.
 
 For how the storage model reached this two-tier layout, see [Version history](../version-history.md).
