@@ -95,6 +95,12 @@ Feature deltas layered onto v2 after the initial collapse.
   configured email provider let anyone register by email: `POST /auth/signup` creates a pending
   account and emails a verification link; `POST /auth/verify-email` activates it. Invitations
   keep working regardless.
+- **Pausing sign-ups** — `instance_settings.signups_halted` (default off) plus a free-text
+  `signup_halt_reason` stop self-serve signup temporarily, with the admin's own sentence shown
+  on the sign-up page. A second switch rather than a flipped `allow_self_signup`: that one is
+  standing policy and carries no reason. Alone among the instance switches it stops at the
+  front door — invitations keep redeeming and emailed verification links still activate — and
+  `POST /auth/signup` answers 503 `{"code": "signups_halted"}`.
 - **Self-serve password reset** — `POST /auth/request-password-reset` emails a reset link to a
   verified account (always a generic response, no enumeration); the existing
   `POST /auth/reset-password` is unchanged.

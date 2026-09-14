@@ -152,7 +152,11 @@ login, refresh, invite `register`, and the self-serve email flows: `POST /auth/s
 `POST /auth/verify-email`, `POST /auth/request-password-reset` and
 `POST /auth/reset-password`. The signup/verify/reset endpoints are gated at runtime
 (`allow_self_signup` and a configured email provider) and rate-limited; the request-reset and
-signup endpoints always return a generic response to avoid account enumeration.
+signup endpoints always return a generic response to avoid account enumeration. `POST
+/auth/signup` carries a second, temporary gate — `signups_halted` — which answers 503 with a
+`{"code": "signups_halted", "message": …}` detail rather than the generic acknowledgement; it
+is checked *after* the availability gate, so an instance offering no self-serve signup still
+answers 404 and does not disclose a halt.
 
 ### Two credentials, one scheme
 
