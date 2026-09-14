@@ -282,9 +282,15 @@ it is also halted, nor publish the admin's reason.
 
 That reason is admin-written free text served by `GET /public/instance-info`, because the
 page that renders it is reached before anyone can authenticate. It is capped at 500
-characters, published only while the halt is on — a leftover sentence from a previous pause
-is not a notice — and shown verbatim under a localised headline, since nothing generic
-carries "we are at the Strava app's daily limit until the 12th".
+characters and shown verbatim under a localised headline, since nothing generic carries "we
+are at the Strava app's daily limit until the 12th".
+
+The endpoint reports the pause against what a visitor can **actually do** — the toggle *and*
+a configured email provider — not against the toggle alone, and it withholds the reason
+whenever it withholds the flag. A leftover sentence from a previous pause is not a notice;
+neither is a pause on an instance whose sign-up page already says "not enabled on this
+instance", where publishing one would contradict the page and put the admin's note on a door
+that was never open.
 
 Email is a **login identifier alongside username** — `users.email` is unique and nullable,
 so invited/legacy accounts keep logging in by username while signup accounts log in by their
