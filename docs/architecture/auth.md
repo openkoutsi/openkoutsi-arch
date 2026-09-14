@@ -250,6 +250,42 @@ configured [email provider](overview.md). When both are true, anyone can registe
    `users.email_verified_at`, and **activates** the account (creating its per-user DB and
    athlete profile exactly like the invite path).
 
+#### Pausing it, without withdrawing it
+
+`instance_settings.signups_halted` is a second switch beside `allow_self_signup`, with a
+free-text `signup_halt_reason`. It exists because the two questions are different:
+whether an instance *offers* self-serve signup is standing policy, while "not this week,
+the box is at its limit" is capacity. Expressing the second through the first tells
+would-be users "self-serve signup isn't enabled on this instance" — untrue during a pause,
+and it hands them nothing — and lifting it afterwards asks the admin to remember what the
+setting had been.
+
+It is the one instance switch that deliberately stops at the **front door** rather than
+refusing a capability, which is the opposite of the reasoning behind the [PAT kill
+switch](#the-instance-kill-switch) directly above. That one has to refuse *authentication*,
+because gating issuance alone would leave every outstanding token working and tell the admin
+a comforting untruth. Here there is no equivalent untruth to tell: what a halt protects is
+the rate at which strangers arrive, so
+
+- **invitations keep redeeming.** An invitation is the admin's own deliberate act, and stays
+  the way to let one specific person in while the public door is shut; and
+- **verification links already emailed still activate.** They are single-use and expire
+  within the hour, so the window is small — and refusing them would strand somebody who
+  signed up minutes earlier with a pending row that can never sign in and no self-serve
+  remedy — a row an admin would then have to find and delete by hand.
+
+`POST /auth/signup` answers **503** — temporary, about capacity — with the structured
+`{"code", "message"}` detail the web app already decodes, so the machine key is the contract
+and the localised copy stays in the frontend. The check sits *after* the `allow_self_signup`
+gate, so an instance that never opened the door still answers 404 and does not disclose that
+it is also halted, nor publish the admin's reason.
+
+That reason is admin-written free text served by `GET /public/instance-info`, because the
+page that renders it is reached before anyone can authenticate. It is capped at 500
+characters, published only while the halt is on — a leftover sentence from a previous pause
+is not a notice — and shown verbatim under a localised headline, since nothing generic
+carries "we are at the Strava app's daily limit until the 12th".
+
 Email is a **login identifier alongside username** — `users.email` is unique and nullable,
 so invited/legacy accounts keep logging in by username while signup accounts log in by their
 verified email. `login` accepts either. Invitations keep working regardless of the toggle;
