@@ -28,7 +28,7 @@ flowchart TD
         Act["activities + sources + streams + intervals"]
         Best["power / distance bests"]
         Goals["goals"]
-        Plans["plans + planned workouts"]
+        Plans["plans + planned workouts<br/>(+ drafted proposals<br/>awaiting a yes)"]
         Work["workout definitions"]
         Crs["courses + tracks + segments<br/>(+ surface & confidence)"]
         Grg["bikes + maintenance + accessories"]
@@ -399,6 +399,33 @@ Everything a single athlete owns — **one athlete per database**:
     is **off** on these connections, so that is documentation rather than behaviour: the delete
     endpoint removes the messages explicitly. Relying on the cascade would orphan every row of a
     thread the athlete believed they had deleted.
+- **Plan proposals** (issue #72) in `plan_proposals`: a training-plan change Koutsi has drafted
+  and the athlete has not decided.
+
+    **A proposal is not a plan.** It is deliberately *not* a `training_plans` row with a draft
+    status, which is the tempting shape and the wrong one: a plan row is picked up by the plan
+    page, the adherence snapshots, the activity matcher and the achievements, so a draft would
+    have to be excluded from each of them separately and the first place that forgot would be a
+    plan the athlete never agreed to. A separate table is inert by construction.
+
+    It also breaks `chat_orm`'s "storage is dialogue only" rule on purpose, and for a different
+    reason than a tool result would: a proposal is neither dialogue nor evidence, it is **a
+    decision the athlete has not made yet**. It has to survive a reload and a restart — the same
+    argument that puts the assistant row in the DB before the answer exists — and applying it must
+    not depend on replaying the model's arguments through a second, differently-behaving
+    completion.
+
+    So `payload` holds the **resolved** change (the built weeks), not the arguments, and `summary`
+    holds the compact preview both the model and the card read — including the plans an approval
+    would archive, by name and date range, which is what makes the yes informed. `status` is
+    `pending` | `applied` | `declined` | `expired` | `superseded`, `built_by` records whether a
+    model or the deterministic builder wrote the weeks, and `expires_at` is 24 hours out. What it
+    leaves in the dialogue is nothing at all: the decision is replayed into the model's history as
+    a note derived from this row at render time, so `chat_messages` is exactly what it was.
+
+    Deleted with its conversation, explicitly, for the same pragma reason as the messages. An
+    *applied* proposal's plan survives: the plan is the athlete's training, not part of the
+    thread. See [LLM & AI features](llm.md#training-plan-proposals-issue-72).
 
 The schema is created idempotently, so an existing message-only DB simply gains the training
 tables on first initialization.

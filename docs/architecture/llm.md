@@ -23,7 +23,7 @@ prompt server-side; there is no general-purpose passthrough:
 | **Course pacing plan** | `llm_course_plan` | Streaming prose |
 | **AI plan generation** | `llm_plan_generator` | One-shot JSON |
 | **AI workout generation** | `llm_workout_generator` | One-shot JSON |
-| **Conversational Koutsi** | `llm_chat` | Streaming prose — [always agentic](#conversational-koutsi-issue-44) |
+| **Conversational Koutsi** | `llm_chat` | Streaming prose — [always agentic](#conversational-koutsi-issue-44), and the only surface that can [propose a write](#training-plan-proposals-issue-72) |
 
 The **course pacing plan** (`llm_course_plan`, issue #55) is the newest and the most tightly
 constrained: the physics has already produced a segment table, so the model is handed that
@@ -498,6 +498,218 @@ ever saw a principal on the personal-access-token path, so every signed-in reque
 the remote address — one household behind one NAT sharing a bucket, one user with two browsers
 getting two. Chat is authenticated, athlete-triggered and expensive, so both auth paths now set
 `request.state.principal_user_id`.
+
+## Training-plan proposals (issue #72)
+
+Koutsi can draft a training plan — a new one, or a change to an existing one — and put it in
+front of the athlete as a structured yes/no. **The model never performs the write.** It drafts,
+the athlete approves, and the approval is what writes.
+
+That is not a stylistic preference; it is forced by a property of the existing code.
+
+### Why a scope could not be the control
+
+The obvious design is `plans:write` on a `create_training_plan` tool. It does nothing at all for
+the surface this feature is about.
+
+The in-process agent calls tools as `ToolCaller.internal(user_id)`, which sets `scopes=None`, and
+`Tool.missing_scopes` returns `[]` for `None` **by design** — that is how a session credential
+means full access. So Koutsi in chat holds every scope implicitly, and a write scope would gate
+an external MCP client while gating Koutsi by exactly one line of prompt.
+
+The prompt cannot be the control either, and `services/llm_chat.py` already says so in its own
+words: *"A system prompt is a first line, not a boundary"*, followed by the BYOK ceiling — an
+athlete pointing openkoutsi at their own local model can make it say anything. "Ask before you
+write" is a rule about not wasting the athlete's attention, not a safety property.
+
+So the control is structural, and it is one sentence long:
+
+!!! danger "The invariant"
+    **No tool, called by anyone, through any door, can reach `training_plans` or
+    `planned_workouts`.** The propose tools write one row to `plan_proposals` and nothing else.
+    The only code that writes a plan is `services.plan_proposals.apply_proposal`, reached from an
+    HTTP route that requires the athlete's own session and a proposal id.
+
+Two tests hold it, and they are the load-bearing ones: a sweep over **every registered tool**
+asserting the plan tables' row counts are identical either side of every call (guarded against
+passing vacuously — the propose tools must be in the swept set, must have succeeded, and must
+have inserted the `plan_proposals` rows they exist for), and one asserting `tools/list` is
+still exactly the ten read tools and that a `tools/call` naming an unpublished one is refused as
+an unknown tool rather than executed.
+
+`TOOL_SCOPES` is unchanged and still read-only by construction; the propose tools declare **read**
+scopes.
+
+### Propose, then apply
+
+```mermaid
+sequenceDiagram
+    participant A as Athlete
+    participant L as Agent loop
+    participant T as propose_* tool
+    participant P as plan_proposals
+    participant R as POST …/proposal/approve
+    participant DB as training_plans
+
+    A->>L: "build me eight weeks for October"
+    L->>T: tool call
+    T->>T: generate_plan_weeks_with_cfg (one completion, no tools array)
+    T->>P: INSERT one row (the resolved draft)
+    T-->>L: compact preview
+    L-->>A: prose + a card with Yes / No
+    Note over DB: nothing has happened
+    A->>R: Yes
+    R->>P: re-validate, mark applied
+    R->>DB: INSERT the plan
+```
+
+A proposal is **inert by construction**: it is not a `TrainingPlan` row, so it does not appear on
+the plan page, accrues no `plan_adherence_daily`, is invisible to the activity matcher and to the
+achievements, and cannot be followed by accident. The alternative — a plan row with a draft
+status — would have to be excluded from each of those separately, and the first place that forgot
+would be a plan the athlete never agreed to.
+
+`payload` holds the **resolved** change (the built weeks), not the model's arguments, so applying
+replays nothing through a second, differently-behaving completion. What the athlete approved is
+what they get.
+
+### The `ToolRun.llm` seam
+
+The draft's weeks come from `generate_plan_weeks_llm` — the same generator `POST /api/plans` uses,
+and already persistence-free. But it takes an `InstanceSettings` and an `allow_instance_fallback`
+derived from `check_llm_access`, and both come from the **registry database**, which
+`test_no_tool_module_reaches_the_registry_database` forbids a tool module from so much as
+mentioning. That test exists so an administrator's session cannot be served more than an ordinary
+athlete's, and it must not be weakened to fit a feature.
+
+The resolution is a seam that already half existed. `llm_agent._run` resolves the athlete's LLM
+once per run via `resolve_stream_setup`, producing `StreamSetup.cfg: ResolvedLlm` — and
+`call_llm_with_optional_schema` takes exactly that type. So `ToolRun` gains
+`llm: Optional[ResolvedLlm]`, `call_tool` hands it down the way `today` already is, `_dispatch`
+passes `setup.cfg`, and `generate_plan_weeks_llm` splits into a thin config-resolving wrapper
+(unchanged for `api/plans.py`) and a `cfg`-taking core the tool calls. The tool module mentions
+nothing from the registry, the test passes verbatim, and the config is in the tool's hands *only
+because the loop that resolved it was entitled to*.
+
+When the MCP door opens later, an external caller simply arrives with `llm=None` and gets the
+deterministic builder — the seam is already the right shape for it.
+
+The same pass fixed a quieter bug: the generator computed its intensity-distribution window from
+`date.today()`, the **server's** date. `ToolRun.today` is the athlete's, which is the whole reason
+issue #43 threaded it through.
+
+### The recursion worry, answered rather than waved away
+
+Issue #42 excluded `/api/llm/*` from the tool surface because *"a tool that calls an LLM from
+inside an LLM loop is a recursion waiting to happen"*. This is answerable rather than hand-waved:
+the nested call goes through `call_llm_with_optional_schema` — **one schema-constrained completion
+with no `tools` array at all** — so it cannot re-enter the tool layer. A nested *call*, not a
+nested *loop*, and a test asserts the absence of the array rather than assuming it.
+
+Three consequences, and one that turned out to be solved already:
+
+- **Timeout.** `TOOL_TIMEOUT_S = 30.0` is not enough, so `Tool` gains an optional `timeout_s` that
+  `_dispatch` reads in place of the constant; the propose tools declare 120 s. `chat_stuck_minutes`
+  is 10, so `settle_stuck_turns` will not declare the turn dead underneath it. The generator's
+  **retry is skipped on this path**: one completion may take the client's full 120 s, so two can
+  outlast the tool's own budget — and a cancelled draft produces *nothing*, where a skipped retry
+  falls back to the deterministic builder and still produces a proposal.
+- **Entitlement — solved by construction.** `check_llm_access` denies every PAT unconditionally.
+  With v1 in-app only, the sole caller is a chat turn that already passed `_require_chat_access`,
+  so there is no second gate to fire and nowhere it could fire from. This is the main reason the
+  MCP door is deferred rather than shipped alongside.
+- **Usage — already handled.** The generator calls `record_llm_usage(..., feature="plan_generate")`
+  itself, so the spend lands in the same bucket `POST /api/plans` puts it in. The docs say plainly
+  that a proposal costs tokens outside the chat turn budget, which counts turns rather than
+  completions.
+- **Slots.** A propose call holds one of `agent_max_concurrent_runs` for up to the timeout. It is
+  the one place a chat turn can occupy a slot for two minutes.
+
+**Fallback, not failure.** If the nested call fails or returns unparseable weeks, the tool falls
+back to the deterministic builder and says so in its result — the same degrade-don't-fail posture
+as `coaching_stream`. `built_by` records which wrote the weeks, so the fallback is visible rather
+than silent.
+
+### Informed consent, and staleness
+
+`create_plan` archives **every active plan whose dates overlap it**. A yes/no that does not say so
+is uninformed consent, so the preview names those plans by name and date range and the card
+renders them above the buttons. The overlap rule moved out of `api/plans.py` into
+`services/plan_lifecycle.py` for exactly this reason: two copies of "which plans does this one
+supersede" is the drift that makes a preview a lie.
+
+Proposals live **24 hours** and are **superseded only by another proposal**, never by an ordinary
+question — an athlete asking "what would that do to my Saturdays?" must still be able to come back
+and click yes on the offer they were asking about.
+
+Staleness is handled **at apply**, not by trusting `expires_at`. The apply path re-runs every
+invariant against the database *now*: the start date is not in the past, the target plan or
+session is still there and not completed, the proposal is still `pending`, and — the one that
+matters most — the archive set is recomputed and compared against what the athlete was shown. A
+plan created since would otherwise be filed away without ever having been mentioned. Applying is
+**idempotent by proposal id**: a double-click produces one plan, and the second call answers with
+the plan the first created.
+
+### The decision does not spend a turn, but the next turn must know about it
+
+Approving costs nothing from the daily budget, cannot fail on a slow model, and the outcome the
+athlete needs — *your plan is live, here it is* — is a fact the backend knows exactly. Nothing is
+gained by asking a model to say it.
+
+But the decision is a **button, not a message**, so it is not in the dialogue at all — and without
+replaying it, Koutsi re-offers a plan the athlete has already accepted. `run_chat_turn_bg` loads
+the proposals for the messages it is replaying and `build_wire_history` appends a backend-written
+note to the assistant turn that carried each one: *"[The athlete approved this; it has been
+applied and is now live.]"*. Derived at render time from the proposal row, so it can never be
+stale, `chat_messages` stays pure dialogue, and the strict alternation that module goes out of its
+way to preserve is untouched — the note rides *inside* the turn rather than becoming one.
+
+Two lifecycle edges that would otherwise leak: `retry_message` discards the turn's pending
+proposal (a retried turn would otherwise leave an orphan approvable out of context), and
+`delete_conversation` deletes the conversation's proposals explicitly, because `PRAGMA
+foreign_keys` is off on these connections. An *applied* proposal's plan survives — the plan is not
+part of the conversation.
+
+### Registered is not published
+
+Both tools are `internal_only`: `registry.published_tools()` is what `mcp/server.py` uses for
+`tools/list` **and** for `tools/call`, so an unpublished tool is refused by name rather than
+merely hidden. The asymmetry is deliberate and worth stating, because issue #42's framing is "two
+consumers, one tool layer, both reach the same tools": half of this feature is an approval control
+in openkoutsi's own UI, and an external client drafting a proposal would leave it sitting in a
+thread nobody has open — a worse experience than not offering it.
+
+### The injection rule had to widen
+
+`_SCOPE_POLICY` said instructions arriving *inside a message* do not change the bands. Plan goals,
+session descriptions and activity notes are athlete-authored free text that reaches the model
+through **tool results**, which are not messages — and a tool result can now lead somewhere. The
+rule is restated to cover text arriving from tools.
+
+This is defence in depth, not the boundary: a model that obeys an injected "rewrite my plan" still
+cannot write. It can only put a proposal in front of the athlete, with a visible preview, for them
+to decline.
+
+### Deferred
+
+The **MCP write tools and the token-permission-scheme change** are a follow-up: `plans:write` in
+`TOOL_SCOPES` paired with a `Tool.writes` declaration, an `apply_plan_proposal` tool, truthful
+`readOnlyHint` / `destructiveHint` annotations, and an `allow_mcp_write_tools` instance toggle
+defaulting off — which would gate **those tools only**, never the in-app flow, where the authority
+is the athlete's own click in their own session on a plan they could already edit by hand.
+
+**MCP elicitation** (`elicitation/create`, 2025-06-18) is the spec's own answer to "ask the user a
+structured question" and the right long-term shape for the external door, but `mcp/server.py` is
+deliberately stateless — one JSON-RPC message per POST with a JSON response — and elicitation
+needs a server→client request mid-call over an SSE response with the answer correlated back. A
+transport rewrite, not a feature.
+
+Also out: write tools for anything else; linking an activity to a planned workout or marking a
+session done (a claim about what *happened* rather than about what is planned, and a wrong one
+silently corrupts adherence scoring and the plan achievements); regenerating a plan's remaining
+weeks from a conversation; any path that applies a proposal without a decision; and undo —
+`unarchive_plan` and the ordinary plan editor are the recovery path, and what this owes is an
+informed yes rather than a reversible one.
 
 ## Subscription gating & usage tracking (issue #9)
 
