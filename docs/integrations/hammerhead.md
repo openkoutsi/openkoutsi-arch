@@ -1,17 +1,10 @@
 # Hammerhead (Karoo)
 
-Hammerhead is the **first two-way integration** (openkoutsi#69). For each kind of data exactly
-one side is the source of truth:
-
-| Data | Source of truth | Direction |
-|---|---|---|
-| Activities | Karoo | pulled — history sync + webhooks |
-| Training metrics (FTP, weight, HR, zones) | openkoutsi | pushed — `POST /metrics` |
-| Routes | openkoutsi (courses) | pushed — `POST`/`PUT /routes/file` |
-
-The split is forced by the API rather than chosen: there is **no `GET /metrics`** and **no route
-download** (`GET /routes` returns `{id, name, createdAt, distance, gain}`, no geometry). So zone
-*sync* does not apply here, and route sync is push-only.
+Hammerhead activities are imported through the **Hammerhead bridge** and the generic
+provider-sync pipeline, like Wahoo's. The integration is deliberately **one-way**
+(openkoutsi#69): the API could also accept routes, workouts and training metrics, but
+nothing is ever written to the athlete's Hammerhead account. That keeps it as simple as
+Strava and Wahoo.
 
 ## Connecting
 
@@ -19,20 +12,12 @@ OAuth 2.0 authorization code at `https://api.hammerhead.io/v1/auth/oauth/{author
 driven by the generic `/integrations/hammerhead/connect` and `/callback` routes. The token response
 carries `user_id`, so — unlike Wahoo — `provider_athlete_id` needs no profile call.
 
-Scopes requested: `activity:read` (activities **and** webhooks), `route:read`, `route:write`,
-`workout:write`, `metrics:write`.
-
-!!! note "Partial grants"
-    A user may grant a subset, and the token response carries no `scope` field, so nothing is
-    gated at connect time. Each capability degrades on its own 403 instead: the client raises
-    `ScopeNotGranted`, and the push endpoints answer `403 insufficient_scope`.
+Scope requested: `activity:read` only, which covers activities **and** webhooks. The token
+response carries no `scope` field, so a user who declined it is found out on the first 403,
+which the client raises as `ScopeNotGranted`.
 
 A refusal on the consent screen redirects to the callback with `?error=access_denied&state=…`
 and no `code`; the callback sends the browser back with `?hammerhead=denied`.
-
-!!! warning "Disconnect is destructive on Hammerhead's side"
-    `/oauth/deauthorize` removes the account link **and deletes every route and workout this
-    client created** for the user. The web app warns before disconnecting.
 
 ## Activity import
 
@@ -91,34 +76,6 @@ sequenceDiagram
     A->>A: parse FIT → dedup window → user DB (priority 2)
     A->>B: POST /events/{id}/ack (or /nack on failure)
 ```
-
-## Pushing metrics
-
-`POST /integrations/hammerhead/push-metrics` sends `Athlete` fields one-to-one:
-
-| `Athlete` | Hammerhead `Metrics` |
-|---|---|
-| `weight_kg` | `weightInKilograms` |
-| `ftp` | `powerFtp` |
-| `max_hr` | `maxHr` |
-| `resting_hr` | `restingHr` |
-| `hr_zones` | `heartRateZones[]` |
-| `power_zones` | `powerZones[]` |
-
-Zones are renamed `{low, high, name}` → `{min, max, name}`; the array has no length limit, so the
-full 7 power / 5 HR zones go as they are. `POST /metrics` is a partial update, so `None` fields are
-**omitted**, leaving them editable on the Karoo. Setting
-`app_settings.hammerhead_auto_push_metrics` makes `PATCH /athlete` push in the background whenever
-one of those fields changes.
-
-## Pushing routes
-
-`POST /courses/{course_id}/push/hammerhead` uploads the course's **original GPX** — already
-stored encrypted at rest — via `POST /routes/file`. The returned id is kept in the per-user
-`hammerhead_route_uploads` table (`course_id` ↔ `hammerhead_route_id`), so a re-push is
-`PUT /routes/{id}/file` (falling back to a new upload if the route was deleted on the Karoo), and
-deleting the course issues `DELETE /routes/{id}`. `Course` itself is untouched. The route sits
-behind the course-recon switch with every other course route.
 
 ## Configuration
 

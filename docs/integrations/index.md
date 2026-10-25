@@ -2,8 +2,8 @@
 
 openkoutsi connects to **Strava**, **Wahoo** and **Hammerhead** to import activities
 automatically. All three follow the same architectural pattern, designed so the main app never
-needs a public inbound endpoint. Hammerhead is also the first **two-way** integration: metrics
-and routes are pushed back to it.
+needs a public inbound endpoint. Activities only ever come *in*; the one thing written back to
+a provider is Wahoo's workout push.
 
 ## The bridge pattern
 
@@ -70,5 +70,5 @@ See the per-provider pages for the specifics:
 - [Strava](strava.md) — stream-based import, HMAC-verified webhooks.
 - [Wahoo](wahoo.md) — FIT-file import, token-in-payload webhooks, and pushing workouts back to
   the device.
-- [Hammerhead](hammerhead.md) — FIT-file import from a sparse activity list, always-on HMAC
-  webhooks, and pushing metrics and routes to the Karoo.
+- [Hammerhead](hammerhead.md) — FIT-file import from a sparse activity list and always-on HMAC
+  webhooks; read-only.
