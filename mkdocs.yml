@@ -77,4 +77,5 @@ nav:
       - Overview: integrations/index.md
       - Strava: integrations/strava.md
       - Wahoo: integrations/wahoo.md
+      - Hammerhead: integrations/hammerhead.md
   - Version history: version-history.md
